@@ -15,8 +15,4 @@ export declare class TelegramBotService implements OnModuleInit {
     private setCommandsWithRetry;
     private setupScenes;
     private setupCommands;
-    private handleTextMessage;
-    private handleLinkConversation;
-    private isKnownCommand;
-    private getStatusEmoji;
 }
