@@ -1,107 +1,145 @@
-import { Injectable, Logger, OnModuleInit, Inject, forwardRef } from '@nestjs/common';
-import { Telegraf, Scenes, session, Context } from 'telegraf';
-import { TelegramService } from './telegram.service';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Telegraf } from 'telegraf';
 import { UsersService } from '../users/users.service';
 import { RequestsService } from '../requests/requests.service';
-import { RequestPriority } from '../requests/entities/car-request.entity';
+import { RequestStatus, RequestPriority } from '../requests/entities/car-request.entity';
+import { CreateRequestDto } from '../requests/dto/create-request.dto';
+
+interface UserState {
+  command: 'link' | 'newrequest';
+  step: number;
+  data: any;
+}
 
 @Injectable()
 export class TelegramBotService implements OnModuleInit {
-  private userState = new Map<number, { command: string; step: number; data: any }>();
-  private logger = new Logger('TelegramBotService');
-  private bot: Telegraf;
-  private stage: any;
+  private readonly bot: Telegraf;
+  private readonly logger = new Logger(TelegramBotService.name);
+  private userState = new Map<number, UserState>();
 
   constructor(
-    private telegramService: TelegramService,
-    private usersService: UsersService,
-    @Inject(forwardRef(() => RequestsService))
-    private requestsService: RequestsService,
+    private readonly configService: ConfigService,
+    private readonly usersService: UsersService,
+    private readonly requestsService: RequestsService,
   ) {
-    this.bot = this.telegramService.getBot();
+    const token = this.configService.get<string>('TELEGRAM_BOT_TOKEN');
+    if (token) {
+      this.bot = new Telegraf(token);
+    } else {
+      this.logger.error('TELEGRAM_BOT_TOKEN is not configured.');
+    }
+  }
+
+  async onModuleInit() {
     if (!this.bot) {
       this.logger.warn('Telegram bot not initialized. Bot commands will not work.');
       return;
     }
 
-    // Setup middleware
-    this.bot.use(session());
-    
-    // Add global error handler
-    this.bot.catch((err, ctx) => {
-      this.logger.error(`Bot error for ${ctx.updateType}:`, err);
-      // Don't crash the bot, just log the error
-    });
-    
-    // Setup commands
-    this.setupCommands();
-  }
+    this.logger.log('Setting up bot commands...');
 
-  async onModuleInit() {
-    if (this.bot) {
-      try {
-        // Set bot commands (with timeout and retry)
-        await this.setCommandsWithRetry();
-
-        // Start the bot with polling
-        await this.bot.launch();
-        this.logger.log('Telegram bot started with polling');
-
-        // Enable graceful stop
-        process.once('SIGINT', () => this.bot.stop('SIGINT'));
-        process.once('SIGTERM', () => this.bot.stop('SIGTERM'));
-      } catch (error) {
-        this.logger.error(`Failed to start Telegram bot: ${error.message}`);
-        this.logger.warn('Bot will continue running but may not respond to commands properly');
-      }
+    try {
+      await this.bot.telegram.setMyCommands([
+        { command: 'start', description: 'Welcome message' },
+        { command: 'help', description: 'Show available commands' },
+        { command: 'link', description: 'Link your Telegram to your FleetMate account' },
+        { command: 'newrequest', description: 'Create a new car request' },
+        { command: 'myrequests', description: 'View your car requests' },
+        { command: 'approvals', description: 'View pending approvals (for approvers)' },
+      ]);
+      this.logger.log('Bot commands set successfully');
+    } catch (error) {
+      this.logger.error(`Failed to set bot commands: ${error.message}`);
     }
-  }
 
-  private async setCommandsWithRetry(maxRetries = 3) {
-    for (let i = 0; i < maxRetries; i++) {
+    this.bot.command('start', (ctx) => {
+      ctx.reply(
+        'Welcome to the FleetMate bot!\n\n' +
+        'Use /help to see a list of available commands.\n' +
+        'To get started, please /link your account.',
+      );
+    });
+
+    this.bot.command('help', (ctx) => {
+      ctx.reply(
+        'Available commands:\n' +
+        '/start - Show welcome message\n' +
+        '/help - Show this help message\n' +
+        '/link - Link your Telegram account\n' +
+        '/newrequest - Create a new car request\n' +
+        '/myrequests - View your car requests\n' +
+        '/approvals - View pending approvals',
+      );
+    });
+
+    this.bot.command('myrequests', async (ctx) => {
       try {
-        await this.bot.telegram.setMyCommands([
-          { command: 'start', description: 'Start the bot' },
-          { command: 'help', description: 'Show help information' },
-          { command: 'link', description: 'Link your Telegram account to FleetMate' },
-          { command: 'myrequests', description: 'Show your car requests' },
-          { command: 'newrequest', description: 'Create a new car request' },
-          { command: 'approvals', description: 'Show your request status' },
-        ]);
-        this.logger.log('Bot commands set successfully');
-        return;
-      } catch (error) {
-        this.logger.warn(`Failed to set bot commands (attempt ${i + 1}/${maxRetries}): ${error.message}`);
-        if (i === maxRetries - 1) {
-          this.logger.error('Failed to set bot commands after all retries');
-        } else {
-          await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
+        const user = await this.usersService.findByTelegramId(ctx.from?.id.toString() || '');
+        if (!user) {
+          await ctx.reply('❌ Your Telegram account is not linked. Please use /link first.');
+          return;
         }
+
+        const requests = await this.requestsService.findByUser(user.id);
+        if (requests.length === 0) {
+          await ctx.reply("You haven't made any requests yet.");
+          return;
+        }
+
+        let reply = 'Your requests:\n\n';
+        requests.forEach((req) => {
+          reply +=
+            `*Request ID*: ${req.id.substring(0, 8)}...\n` +
+            `*Destination*: ${req.destination}\n` +
+            `*Status*: ${this.getStatusEmoji(req.status)} ${req.status}\n` +
+            '---\n';
+        });
+
+        await ctx.reply(reply, { parse_mode: 'Markdown' });
+      } catch (error) {
+        this.logger.error(`Error fetching requests: ${error.message}`);
+        await ctx.reply('❌ An error occurred while fetching your requests.');
       }
-    }
-  }
-
-  // Simplified approach without complex scenes for now
-  private setupScenes() {
-    // We'll implement simpler command-based interactions
-  }
-
-  private setupCommands() {
-    // Start command
-    this.bot.start(async (ctx) => {
-      await ctx.reply(
-        `👋 Welcome to FleetMate Bot!\n\nThis bot helps you manage car requests and receive notifications.\n\nTo get started, please link your FleetMate account using the /link command.\n\nType /help to see all available commands.`
-      );
     });
 
-    // Help command
-    this.bot.help(async (ctx) => {
-      await ctx.reply(
-        `🚗 FleetMate Bot Commands:\n\n/start - Start the bot\n/help - Show this help message\n/link - Link your Telegram account to FleetMate\n/myrequests - Show your car requests\n/newrequest - Create a new car request\n/approvals - Show your request status`
-      );
+    this.bot.command('approvals', async (ctx) => {
+      try {
+        const user = await this.usersService.findByTelegramId(ctx.from.id.toString());
+        if (!user) {
+          await ctx.reply('❌ Your Telegram account is not linked. Please use /link first.');
+          return;
+        }
+
+        if (!['authority', 'approver', 'admin'].includes(user.role)) {
+          await ctx.reply('⚠️ You do not have permission to view approvals. Use /myrequests to see your own requests.');
+          return;
+        }
+
+        const pendingApprovals = await this.requestsService.findPendingApprovals(user.id);
+
+        if (pendingApprovals.length === 0) {
+          await ctx.reply('✅ No pending approvals.');
+          return;
+        }
+
+        let reply = 'Pending approvals:\n\n';
+        pendingApprovals.forEach((req) => {
+          reply +=
+            `*Request ID*: ${req.id.substring(0, 8)}...\n` +
+            `*User*: ${req.user.fullName} (${req.user.email})\n` +
+            `*Destination*: ${req.destination}\n` +
+            `*Status*: ${this.getStatusEmoji(req.status)} ${req.status}\n` +
+            '---\n';
+        });
+
+        await ctx.reply(reply, { parse_mode: 'Markdown' });
+      } catch (error) {
+        this.logger.error(`Error fetching approvals: ${error.message}`);
+        await ctx.reply('❌ An error occurred while fetching approvals.');
+      }
     });
 
-    // Link command
     this.bot.command('link', async (ctx) => {
       const telegramId = ctx.from.id;
       if (!telegramId) {
@@ -119,255 +157,25 @@ export class TelegramBotService implements OnModuleInit {
       this.userState.set(telegramId, { command: 'link', step: 1, data: {} });
       await ctx.reply('To link your account, please provide your FleetMate email address:');
     });
-    
-    // Command to create new request
+
     this.bot.command('newrequest', async (ctx) => {
-      try {
-        const user = await this.usersService.findByTelegramId(ctx.from?.id.toString() || '');
-        if (!user) {
-          await ctx.reply('❌ Your Telegram account is not linked to FleetMate. Please use /link first.');
-          return;
-        }
-
-        await ctx.reply('🚗 Creating a new car request...\n\nPlease provide the following information:\n\n1️⃣ **Destination**: Where do you need to go?');
-        
-        const requestData: {
-          step: number;
-          destination?: string;
-          purpose?: string;
-          departureDateTime?: Date;
-          returnDateTime?: Date;
-          priority?: RequestPriority;
-        } = { step: 1 };
-        
-        let isRequestListening = true;
-        const requestListener = async (reqCtx) => {
-          if (!isRequestListening || reqCtx.from?.id !== ctx.from?.id) return;
-          
-          // Skip if this is a command
-          if (reqCtx.message?.text?.startsWith('/')) return;
-          
-          const text = reqCtx.message?.text?.trim();
-          if (!text) return;
-          
-          this.logger.log(`Processing newrequest step ${requestData.step} with text: ${text}`);
-          
-          if (requestData.step === 1) {
-            requestData.destination = text;
-            requestData.step = 2;
-            await reqCtx.reply('2️⃣ **Purpose**: What is the purpose of your trip?');
-          } else if (requestData.step === 2) {
-            requestData.purpose = text;
-            requestData.step = 3;
-            await reqCtx.reply('3️⃣ **Departure Date & Time**: When do you need to leave? (Format: YYYY-MM-DD HH:MM)');
-          } else if (requestData.step === 3) {
-            // Parse date
-            const dateRegex = /^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})$/;
-            const match = text.match(dateRegex);
-            
-            if (!match) {
-              await reqCtx.reply('❌ Invalid date format. Please use: YYYY-MM-DD HH:MM (e.g., 2025-07-20 14:30)');
-              return;
-            }
-            
-            const [, year, month, day, hour, minute] = match;
-            const departureDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day), parseInt(hour), parseInt(minute));
-            
-            if (departureDate <= new Date()) {
-              await reqCtx.reply('❌ Departure time must be in the future.');
-              return;
-            }
-            
-            requestData.departureDateTime = departureDate;
-            requestData.step = 4;
-            await reqCtx.reply('4️⃣ **Return Date & Time**: When do you plan to return? (Format: YYYY-MM-DD HH:MM)');
-          } else if (requestData.step === 4) {
-            // Parse return date
-            const dateRegex = /^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})$/;
-            const match = text.match(dateRegex);
-            
-            if (!match) {
-              await reqCtx.reply('❌ Invalid date format. Please use: YYYY-MM-DD HH:MM (e.g., 2025-07-20 18:00)');
-              return;
-            }
-            
-            const [, year, month, day, hour, minute] = match;
-            const returnDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day), parseInt(hour), parseInt(minute));
-            
-            if (returnDate <= requestData.departureDateTime!) {
-              await reqCtx.reply('❌ Return time must be after departure time.');
-              return;
-            }
-            
-            requestData.returnDateTime = returnDate;
-            requestData.step = 5;
-            await reqCtx.reply('5️⃣ **Priority**: What is the priority of this request?\n\n1 - Low\n2 - Medium\n3 - High\n4 - Urgent\n\nPlease enter a number (1-4):');
-          } else if (requestData.step === 5) {
-            const priority = parseInt(text);
-            if (priority < 1 || priority > 4) {
-              await reqCtx.reply('❌ Please enter a valid priority number (1-4).');
-              return;
-            }
-            
-            const priorityMap = {
-              1: RequestPriority.LOW,
-              2: RequestPriority.MEDIUM,
-              3: RequestPriority.HIGH,
-              4: RequestPriority.URGENT
-            };
-            
-            requestData.priority = priorityMap[priority];
-            
-            // Create the request
-            try {
-              const createRequestDto = {
-                destination: requestData.destination!,
-                purpose: requestData.purpose!,
-                departureDateTime: requestData.departureDateTime!,
-                returnDateTime: requestData.returnDateTime!,
-                priority: requestData.priority!,
-                passengerCount: 1 // Default to 1
-              };
-              
-              const newRequest = await this.requestsService.create(user.id, createRequestDto);
-              
-              await reqCtx.reply(
-                `✅ **Request Created Successfully!**\n\n` +
-                `🆔 Request ID: ${newRequest.id.substring(0, 8)}...\n` +
-                `📍 Destination: ${requestData.destination}\n` +
-                `🎯 Purpose: ${requestData.purpose}\n` +
-                `🕐 Departure: ${requestData.departureDateTime!.toLocaleString()}\n` +
-                `🕐 Return: ${requestData.returnDateTime!.toLocaleString()}\n` +
-                `⚡ Priority: ${requestData.priority}\n\n` +
-                `Your request has been submitted and is now under review. You will receive notifications about status updates.`
-              );
-              
-              isRequestListening = false;
-            } catch (error) {
-              this.logger.error(`Error creating request: ${error.message}`);
-              await reqCtx.reply('❌ An error occurred while creating your request. Please try again later.');
-              isRequestListening = false;
-            }
-          }
-        };
-        
-        this.bot.on('text', requestListener);
-        
-        // Remove listener after 10 minutes
-        setTimeout(() => {
-          isRequestListening = false;
-        }, 600000);
-        
-      } catch (error) {
-        this.logger.error(`Error in newrequest command: ${error.message}`);
-        await ctx.reply('❌ An error occurred. Please try again later.');
+      const userId = ctx.from.id;
+      const user = await this.usersService.findByTelegramId(userId.toString());
+      if (!user) {
+        await ctx.reply('❌ Your Telegram account is not linked to FleetMate. Please use /link first.');
+        return;
       }
-    });
 
-    // My requests command
-    this.bot.command('myrequests', async (ctx) => {
-      try {
-        const user = await this.usersService.findByTelegramId(ctx.from.id.toString());
-        if (!user) {
-          await ctx.reply('❌ Your Telegram account is not linked to FleetMate. Please use /link first.');
-          return;
-        }
-        
-        const requests = await this.requestsService.findByUser(user.id);
-        
-        if (requests.length === 0) {
-          await ctx.reply('🚗 Your Car Requests:\n\nNo requests found. Use /newrequest to create one.');
-          return;
-        }
-        
-        let message = '🚗 **Your Car Requests:**\n\n';
-        
-        for (const request of requests.slice(0, 5)) { // Show last 5 requests
-          const statusEmoji = this.getStatusEmoji(request.status);
-          message += `${statusEmoji} **${request.id.substring(0, 8)}...** - ${request.status}\n`;
-          message += `📍 ${request.destination}\n`;
-          message += `🕐 ${new Date(request.departureDateTime).toLocaleDateString()}\n`;
-          message += `⚡ ${request.priority}\n\n`;
-        }
-        
-        if (requests.length > 5) {
-          message += `... and ${requests.length - 5} more requests`;
-        }
-        
-        await ctx.reply(message);
-      } catch (error) {
-        this.logger.error(`Error fetching requests: ${error.message}`);
-        await ctx.reply('❌ An error occurred while fetching your requests. Please try again later.');
-      }
-    });
-
-    // Approvals command - now shows user's request status instead of permission error
-    this.bot.command('approvals', async (ctx) => {
-      try {
-        const user = await this.usersService.findByTelegramId(ctx.from.id.toString());
-        if (!user) {
-          await ctx.reply('❌ Your Telegram account is not linked to FleetMate. Please use /link first.');
-          return;
-        }
-        
-        // If user is an approver/admin/authority, show pending approvals
-        if (user.role === 'approver' || user.role === 'admin' || user.role === 'authority') {
-          const pendingApprovals = await this.requestsService.findPendingApprovals(user.id);
-          
-          if (pendingApprovals.length === 0) {
-            await ctx.reply('📋 **Pending Approvals:**\n\nNo pending approvals found.');
-            return;
-          }
-          
-          let message = '📋 **Pending Approvals:**\n\n';
-          
-          for (const request of pendingApprovals.slice(0, 5)) {
-            message += `🆔 **${request.id.substring(0, 8)}...** - ${request.user.firstName} ${request.user.lastName}\n`;
-            message += `📍 ${request.destination}\n`;
-            message += `🕐 ${new Date(request.departureDateTime).toLocaleDateString()}\n`;
-            message += `⚡ ${request.priority}\n\n`;
-          }
-          
-          await ctx.reply(message);
-        } else {
-          // For regular users, show their own request status
-          const requests = await this.requestsService.findByUser(user.id);
-          const pendingRequests = requests.filter(r => 
-            r.status === 'submitted' || 
-            r.status === 'under_review' || 
-            r.status === 'eligible'
-          );
-          
-          if (pendingRequests.length === 0) {
-            await ctx.reply('📋 **Your Request Status:**\n\nNo pending requests found.');
-            return;
-          }
-          
-          let message = '📋 **Your Request Status:**\n\n';
-          
-          for (const request of pendingRequests) {
-            const statusEmoji = this.getStatusEmoji(request.status);
-            message += `${statusEmoji} **${request.id.substring(0, 8)}...** - ${request.status}\n`;
-            message += `📍 ${request.destination}\n`;
-            message += `🕐 ${new Date(request.departureDateTime).toLocaleDateString()}\n`;
-            
-            if (request.approvals && request.approvals.length > 0) {
-              const latestApproval = request.approvals[request.approvals.length - 1];
-              message += `👤 Current approver: ${latestApproval.approver.firstName} ${latestApproval.approver.lastName}\n`;
-            }
-            
-            message += '\n';
-          }
-          
-          await ctx.reply(message);
-        }
-      } catch (error) {
-        this.logger.error(`Error fetching approvals: ${error.message}`);
-        await ctx.reply('❌ An error occurred while fetching approvals. Please try again later.');
-      }
+      this.userState.set(userId, { command: 'newrequest', step: 1, data: { userId: user.id } });
+      await ctx.reply('🚗 Creating a new car request...\n\nPlease provide the following information:\n\n1️⃣ **Destination**: Where do you need to go?');
     });
 
     this.bot.on('text', (ctx) => this.handleTextMessage(ctx));
+
+    this.bot.launch();
+    this.logger.log('Telegram bot started');
+    process.once('SIGINT', () => this.bot.stop('SIGINT'));
+    process.once('SIGTERM', () => this.bot.stop('SIGTERM'));
   }
 
   private async handleTextMessage(ctx: any) {
@@ -375,22 +183,29 @@ export class TelegramBotService implements OnModuleInit {
     const state = this.userState.get(userId);
 
     if (state) {
-      switch (state.command) {
-        case 'link':
-          await this.handleLinkConversation(ctx, userId, state);
-          break;
-        // case 'newrequest':
-        //   await this.handleNewRequestConversation(ctx, userId, state);
-        //   break;
+      if (ctx.message.text.startsWith('/')) {
+        await ctx.reply('⚠️ Command received. Cancelling current operation.');
+        this.userState.delete(userId);
+        // Do not return, let the command be processed by its own handler.
+      } else {
+        switch (state.command) {
+          case 'link':
+            await this.handleLinkConversation(ctx, userId, state);
+            return; // Stop processing to avoid falling through to command handlers
+          case 'newrequest':
+            await this.handleNewRequestConversation(ctx, userId, state);
+            return; // Stop processing
+        }
       }
-    } else {
-      if (ctx.message.text.startsWith('/') && !this.isKnownCommand(ctx.message.text)) {
-        await ctx.reply('❌ Unknown command. Type /help to see all available commands.');
-      }
+    }
+
+    // Fallback for unknown commands if no state is active
+    if (ctx.message.text.startsWith('/') && !this.isKnownCommand(ctx.message.text)) {
+      await ctx.reply('❌ Unknown command. Type /help to see all available commands.');
     }
   }
 
-  private async handleLinkConversation(ctx: any, userId: number, state: any) {
+  private async handleLinkConversation(ctx: any, userId: number, state: UserState) {
     if (state.step === 1) {
       const email = ctx.message.text.trim();
 
@@ -422,26 +237,130 @@ export class TelegramBotService implements OnModuleInit {
       }
     }
   }
-  
-  private isKnownCommand(text: string): boolean {
-    const knownCommands = ['/start', '/help', '/link', '/myrequests', '/newrequest', '/approvals'];
-    const command = text.split(' ')[0]; // Get just the command part
-    return knownCommands.includes(command);
+
+  private async handleNewRequestConversation(ctx: any, userId: number, state: UserState) {
+    const text = ctx.message.text.trim();
+    const { data } = state;
+
+    try {
+      switch (state.step) {
+        case 1: // Destination -> Purpose
+          state.data.destination = text;
+          state.step = 2;
+          await ctx.reply('2️⃣ **Purpose**: What is the purpose of your trip?');
+          break;
+
+        case 2: // Purpose -> Departure Time
+          state.data.purpose = text;
+          state.step = 3;
+          await ctx.reply('3️⃣ **Departure Date & Time**: When do you need to leave? (Format: YYYY-MM-DD HH:MM)');
+          break;
+
+        case 3: // Departure Time -> Return Time
+          const departureDate = this.parseDate(text);
+          if (!departureDate) {
+            await ctx.reply('❌ Invalid date format. Please use: YYYY-MM-DD HH:MM (e.g., 2025-07-20 14:30)');
+            return;
+          }
+          if (departureDate <= new Date()) {
+            await ctx.reply('❌ Departure time must be in the future.');
+            return;
+          }
+          state.data.departureDateTime = departureDate;
+          state.step = 4;
+          await ctx.reply('4️⃣ **Return Date & Time**: When do you plan to return? (Format: YYYY-MM-DD HH:MM)');
+          break;
+
+        case 4: // Return Time -> Priority
+          const returnDate = this.parseDate(text);
+          if (!returnDate) {
+            await ctx.reply('❌ Invalid date format. Please use: YYYY-MM-DD HH:MM');
+            return;
+          }
+          if (returnDate <= state.data.departureDateTime) {
+            await ctx.reply('❌ Return time must be after the departure time.');
+            return;
+          }
+          state.data.returnDateTime = returnDate;
+          state.step = 5;
+          await ctx.reply('5️⃣ **Priority**: What is the priority? (low, medium, high)');
+          break;
+
+        case 5: // Priority -> Create Request
+          const priority = text.toLowerCase() as RequestPriority;
+          if (!Object.values(RequestPriority).includes(priority)) {
+            await ctx.reply('❌ Invalid priority. Please enter low, medium, or high.');
+            return;
+          }
+          state.data.priority = priority;
+
+          const { userId: requestUserId, ...rest } = state.data;
+          const createRequestDto: CreateRequestDto = {
+            ...rest,
+            passengerCount: 1, // Default value
+          };
+
+          const newRequest = await this.requestsService.create(requestUserId, createRequestDto);
+
+          await ctx.reply(
+            `✅ **Request Created Successfully!**\n\n` +
+            `🆔 Request ID: ${newRequest.id.substring(0, 8)}...\n` +
+            `📍 Destination: ${createRequestDto.destination}\n` +
+            `🎯 Purpose: ${createRequestDto.purpose}\n` +
+            `🕐 Departure: ${createRequestDto.departureDateTime.toLocaleString()}\n` +
+            `🕐 Return: ${createRequestDto.returnDateTime.toLocaleString()}\n` +
+            `⚡ Priority: ${createRequestDto.priority}\n\n` +
+            `Your request has been submitted and is now under review. You will receive notifications about status updates.`,
+          );
+
+          this.userState.delete(userId);
+          break;
+      }
+    } catch (error) {
+      this.logger.error(`Error in newrequest conversation: ${error.message}`);
+      await ctx.reply('❌ An error occurred. Please try starting over with /newrequest.');
+      this.userState.delete(userId);
+    }
   }
-  
-  private getStatusEmoji(status: string): string {
-    const statusEmojis = {
-      'submitted': '📝',
-      'under_review': '👀',
-      'eligible': '✅',
-      'approved': '🎉',
-      'rejected': '❌',
-      'ineligible': '⛔',
-      'car_assigned': '🚗',
-      'in_progress': '🚙',
-      'completed': '✅',
-      'cancelled': '🚫'
-    };
-    return statusEmojis[status] || '📋';
+
+  private parseDate(dateString: string): Date | null {
+    const dateRegex = /^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})$/;
+    const match = dateString.match(dateRegex);
+    if (!match) return null;
+
+    const [, year, month, day, hour, minute] = match.map(Number);
+    return new Date(year, month - 1, day, hour, minute);
+  }
+
+  private isKnownCommand(text: string): boolean {
+    const knownCommands = ['/start', '/help', '/link', '/newrequest', '/myrequests', '/approvals'];
+    return knownCommands.some(command => text.startsWith(command));
+  }
+
+  private getStatusEmoji(status: RequestStatus): string {
+    switch (status) {
+      case RequestStatus.SUBMITTED:
+        return '📝';
+      case RequestStatus.UNDER_REVIEW:
+        return '👀';
+      case RequestStatus.ELIGIBLE:
+        return '👍';
+      case RequestStatus.APPROVED:
+        return '✅';
+      case RequestStatus.REJECTED:
+        return '❌';
+      case RequestStatus.INELIGIBLE:
+        return '🚫';
+      case RequestStatus.CAR_ASSIGNED:
+        return '🚗';
+      case RequestStatus.IN_PROGRESS:
+        return '🏃‍♂️';
+      case RequestStatus.COMPLETED:
+        return '🏁';
+      case RequestStatus.CANCELLED:
+        return '🛑';
+      default:
+        return '❓';
+    }
   }
 }
