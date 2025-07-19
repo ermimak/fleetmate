@@ -15,6 +15,8 @@ export enum RequestStatus {
   IN_PROGRESS = 'in_progress',
   COMPLETED = 'completed',
   CANCELLED = 'cancelled',
+  PENDING_ELIGIBILITY = "PENDING_ELIGIBILITY",
+  PENDING_APPROVAL = "PENDING_APPROVAL",
 }
 
 export enum RequestPriority {

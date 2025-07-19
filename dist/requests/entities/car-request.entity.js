@@ -27,6 +27,8 @@ var RequestStatus;
     RequestStatus["IN_PROGRESS"] = "in_progress";
     RequestStatus["COMPLETED"] = "completed";
     RequestStatus["CANCELLED"] = "cancelled";
+    RequestStatus["PENDING_ELIGIBILITY"] = "PENDING_ELIGIBILITY";
+    RequestStatus["PENDING_APPROVAL"] = "PENDING_APPROVAL";
 })(RequestStatus || (exports.RequestStatus = RequestStatus = {}));
 var RequestPriority;
 (function (RequestPriority) {

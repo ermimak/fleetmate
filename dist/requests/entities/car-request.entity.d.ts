@@ -12,7 +12,9 @@ export declare enum RequestStatus {
     CAR_ASSIGNED = "car_assigned",
     IN_PROGRESS = "in_progress",
     COMPLETED = "completed",
-    CANCELLED = "cancelled"
+    CANCELLED = "cancelled",
+    PENDING_ELIGIBILITY = "PENDING_ELIGIBILITY",
+    PENDING_APPROVAL = "PENDING_APPROVAL"
 }
 export declare enum RequestPriority {
     LOW = "low",
