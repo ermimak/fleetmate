@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { Telegraf } from 'telegraf';
 import { UsersService } from '../users/users.service';
 import { RequestsService } from '../requests/requests.service';
+import { ApprovalsService } from '../requests/approvals.service';
 import { RequestStatus, RequestPriority } from '../requests/entities/car-request.entity';
 import { CreateRequestDto } from '../requests/dto/create-request.dto';
 
@@ -22,6 +23,7 @@ export class TelegramBotService implements OnModuleInit {
     private readonly configService: ConfigService,
     private readonly usersService: UsersService,
     private readonly requestsService: RequestsService,
+    private readonly approvalsService: ApprovalsService,
   ) {
     const token = this.configService.get<string>('TELEGRAM_BOT_TOKEN');
     if (token) {
@@ -89,14 +91,17 @@ export class TelegramBotService implements OnModuleInit {
 
         let reply = 'Your requests:\n\n';
         requests.forEach((req) => {
+          const destination = this.escapeMarkdownV2(req.destination);
+          const status = this.escapeMarkdownV2(req.status);
+          const id = this.escapeMarkdownV2(req.id.substring(0, 8) + '...');
+
           reply +=
-            `*Request ID*: ${req.id.substring(0, 8)}...\n` +
-            `*Destination*: ${req.destination}\n` +
-            `*Status*: ${this.getStatusEmoji(req.status)} ${req.status}\n` +
-            '---\n';
+            `*Request ID*: ${id}\n` +
+            `*Destination*: ${destination}\n` +
+            `*Status*: ${this.getStatusEmoji(req.status)} ${status}\n\n`;
         });
 
-        await ctx.reply(reply, { parse_mode: 'Markdown' });
+        await ctx.reply(reply, { parse_mode: 'MarkdownV2' });
       } catch (error) {
         this.logger.error(`Error fetching requests: ${error.message}`);
         await ctx.reply('❌ An error occurred while fetching your requests.');
@@ -112,28 +117,59 @@ export class TelegramBotService implements OnModuleInit {
         }
 
         if (!['authority', 'approver', 'admin'].includes(user.role)) {
-          await ctx.reply('⚠️ You do not have permission to view approvals. Use /myrequests to see your own requests.');
+          // For regular users, show their own request statuses
+          const requests = await this.requestsService.findByUser(user.id);
+          if (requests.length === 0) {
+            await ctx.reply("You haven't made any requests yet.");
+            return;
+          }
+
+          let reply = 'Your requests:\n\n';
+          requests.forEach((req) => {
+            const destination = this.escapeMarkdownV2(req.destination);
+            const status = this.escapeMarkdownV2(req.status);
+            const id = this.escapeMarkdownV2(req.id.substring(0, 8) + '...');
+
+            reply +=
+              `*Request ID*: ${id}\n` +
+              `*Destination*: ${destination}\n` +
+              `*Status*: ${this.getStatusEmoji(req.status)} ${status}\n\n`;
+          });
+          await ctx.reply(reply, { parse_mode: 'MarkdownV2' });
           return;
         }
 
         const pendingApprovals = await this.requestsService.findPendingApprovals(user.id);
 
         if (pendingApprovals.length === 0) {
-          await ctx.reply('✅ No pending approvals.');
+          await ctx.reply('✅ No pending approvals for you.');
           return;
         }
 
-        let reply = 'Pending approvals:\n\n';
-        pendingApprovals.forEach((req) => {
-          reply +=
-            `*Request ID*: ${req.id.substring(0, 8)}...\n` +
-            `*User*: ${req.user.fullName} (${req.user.email})\n` +
-            `*Destination*: ${req.destination}\n` +
-            `*Status*: ${this.getStatusEmoji(req.status)} ${req.status}\n` +
-            '---\n';
-        });
+        await ctx.reply('Pending approvals:');
 
-        await ctx.reply(reply, { parse_mode: 'Markdown' });
+        for (const request of pendingApprovals) {
+          const requestDetails =
+            `*Request ID*: ${this.escapeMarkdownV2(request.id.substring(0, 8) + '...')}\n` +
+            `*User*: ${this.escapeMarkdownV2(request.user.fullName + ' (' + request.user.email + ')')}\n` +
+            `*Destination*: ${this.escapeMarkdownV2(request.destination)}\n` +
+            `*Purpose*: ${this.escapeMarkdownV2(request.purpose)}\n` +
+            `*Departure*: ${this.escapeMarkdownV2(new Date(request.departureDateTime).toLocaleString())}\n` +
+            `*Return*: ${this.escapeMarkdownV2(request.returnDateTime ? new Date(request.returnDateTime).toLocaleString() : 'N/A')}\n` +
+            `*Priority*: ${this.escapeMarkdownV2(request.priority)}\n` +
+            `*Status*: ${this.getStatusEmoji(request.status)} ${this.escapeMarkdownV2(request.status)}`;
+
+          await ctx.reply(requestDetails, {
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: '✅ Approve', callback_data: `approve:${request.id}` },
+                  { text: '❌ Reject', callback_data: `reject:${request.id}` },
+                ],
+              ],
+            },
+          });
+        }
       } catch (error) {
         this.logger.error(`Error fetching approvals: ${error.message}`);
         await ctx.reply('❌ An error occurred while fetching approvals.');
@@ -171,6 +207,57 @@ export class TelegramBotService implements OnModuleInit {
     });
 
     this.bot.on('text', (ctx) => this.handleTextMessage(ctx));
+
+    this.bot.action(/approve:(.+)/, async (ctx) => {
+      try {
+        const user = await this.usersService.findByTelegramId(ctx.from.id.toString());
+        if (!user) {
+          await ctx.reply('❌ Your Telegram account is not linked. Please use /link first.');
+          return;
+        }
+
+        const requestId = ctx.match[1];
+        const approvals = await this.approvalsService.findByRequest(requestId);
+        const pendingApproval = approvals.find(a => a.approverId === user.id && a.status === 'pending');
+
+        if (!pendingApproval) {
+          await ctx.editMessageText('⚠️ This request is no longer pending your approval.');
+          return;
+        }
+
+        await this.approvalsService.approve(pendingApproval.id);
+        await ctx.editMessageText(`✅ Request ${requestId.substring(0, 8)}... approved.`);
+      } catch (error) {
+        this.logger.error(`Error approving request: ${error.message}`);
+        await ctx.reply(`❌ Failed to approve request. Reason: ${error.message}`);
+      }
+    });
+
+    this.bot.action(/reject:(.+)/, async (ctx) => {
+      try {
+        const user = await this.usersService.findByTelegramId(ctx.from.id.toString());
+        if (!user) {
+          await ctx.reply('❌ Your Telegram account is not linked. Please use /link first.');
+          return;
+        }
+
+        const requestId = ctx.match[1];
+        const approvals = await this.approvalsService.findByRequest(requestId);
+        const pendingApproval = approvals.find(a => a.approverId === user.id && a.status === 'pending');
+
+        if (!pendingApproval) {
+          await ctx.editMessageText('⚠️ This request is no longer pending your approval.');
+          return;
+        }
+
+        // In a real app, you'd likely prompt for a reason
+        await this.approvalsService.reject(pendingApproval.id, 'Rejected via Telegram bot');
+        await ctx.editMessageText(`❌ Request ${requestId.substring(0, 8)}... rejected.`);
+      } catch (error) {
+        this.logger.error(`Error rejecting request: ${error.message}`);
+        await ctx.reply(`❌ Failed to reject request. Reason: ${error.message}`);
+      }
+    });
 
     this.bot.launch();
     this.logger.log('Telegram bot started');
@@ -342,25 +429,39 @@ export class TelegramBotService implements OnModuleInit {
       case RequestStatus.SUBMITTED:
         return '📝';
       case RequestStatus.UNDER_REVIEW:
-        return '👀';
       case RequestStatus.ELIGIBLE:
-        return '👍';
+        return '👀';
       case RequestStatus.APPROVED:
-        return '✅';
-      case RequestStatus.REJECTED:
-        return '❌';
-      case RequestStatus.INELIGIBLE:
-        return '🚫';
       case RequestStatus.CAR_ASSIGNED:
-        return '🚗';
+        return '✅';
       case RequestStatus.IN_PROGRESS:
-        return '🏃‍♂️';
+        return '🚀';
       case RequestStatus.COMPLETED:
         return '🏁';
+      case RequestStatus.REJECTED:
+      case RequestStatus.INELIGIBLE:
       case RequestStatus.CANCELLED:
-        return '🛑';
+        return '❌';
       default:
         return '❓';
+    }
+  }
+
+  public escapeMarkdownV2(text: string): string {
+    if (!text) return '';
+    // Escape characters for Telegram MarkdownV2
+    return text.replace(/([\_\*\`\{\}\[\]\(\)\#\+\-\=\|\!\.\>])/g, '\\$1');
+  }
+
+  async sendMessage(chatId: string, text: string, parseMode?: 'MarkdownV2' | 'HTML' | 'Markdown') {
+    try {
+      const extra: any = {};
+      if (parseMode) {
+        extra.parse_mode = parseMode;
+      }
+      await this.bot.telegram.sendMessage(chatId, text, extra);
+    } catch (error) {
+      this.logger.error(`Failed to send message to ${chatId}: ${error.message}`);
     }
   }
 }

@@ -13,6 +13,7 @@ export declare class NotificationsService {
     notifyCarAssigned(request: CarRequest): Promise<void>;
     notifyApprovalAssigned(approval: Approval): Promise<void>;
     notifyApprovalDecision(approval: Approval, isApproved: boolean): Promise<void>;
+    notifyRequestRejected(request: CarRequest, reason: string): Promise<void>;
     sendGeneralNotification(userId: string, title: string, message: string): Promise<void>;
     broadcastNotification(title: string, message: string, roles?: string[]): Promise<void>;
 }

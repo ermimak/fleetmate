@@ -90,7 +90,7 @@ let RequestsService = class RequestsService {
     async findByUser(userId) {
         return this.requestRepository.find({
             where: { userId },
-            relations: ['assignedCar', 'assignedDriver', 'approvals'],
+            relations: ['user', 'assignedCar', 'assignedDriver', 'approvals'],
             order: { createdAt: 'DESC' },
         });
     }

@@ -19,11 +19,14 @@ const typeorm_2 = require("typeorm");
 const approval_entity_1 = require("./entities/approval.entity");
 const car_request_entity_1 = require("./entities/car-request.entity");
 const notifications_service_1 = require("../notifications/notifications.service");
+const users_service_1 = require("../users/users.service");
+const user_entity_1 = require("../users/entities/user.entity");
 let ApprovalsService = class ApprovalsService {
-    constructor(approvalRepository, requestRepository, notificationsService) {
+    constructor(approvalRepository, requestRepository, notificationsService, usersService) {
         this.approvalRepository = approvalRepository;
         this.requestRepository = requestRepository;
         this.notificationsService = notificationsService;
+        this.usersService = usersService;
     }
     async createApproval(createApprovalDto) {
         const approval = this.approvalRepository.create({
@@ -125,19 +128,19 @@ let ApprovalsService = class ApprovalsService {
             });
         }
         await this.notificationsService.notifyApprovalDecision(updatedApproval, false);
+        await this.notificationsService.notifyRequestRejected(updatedApproval.request, comments);
         return updatedApproval;
     }
     async createFinalApproval(requestId) {
-        const request = await this.requestRepository.findOne({
-            where: { id: requestId },
-            relations: ['user'],
-        });
-        if (!request) {
-            throw new common_1.NotFoundException('Request not found');
+        const admins = await this.usersService.findByRole(user_entity_1.UserRole.ADMIN);
+        if (!admins.length) {
+            console.error('No admin user found to assign final approval.');
+            return;
         }
+        const adminApproverId = admins[0].id;
         await this.createApproval({
             requestId,
-            approverId: request.user.managerId,
+            approverId: adminApproverId,
             type: approval_entity_1.ApprovalType.FINAL_APPROVAL,
         });
     }
@@ -149,6 +152,7 @@ exports.ApprovalsService = ApprovalsService = __decorate([
     __param(1, (0, typeorm_1.InjectRepository)(car_request_entity_1.CarRequest)),
     __metadata("design:paramtypes", [typeorm_2.Repository,
         typeorm_2.Repository,
-        notifications_service_1.NotificationsService])
+        notifications_service_1.NotificationsService,
+        users_service_1.UsersService])
 ], ApprovalsService);
 //# sourceMappingURL=approvals.service.js.map

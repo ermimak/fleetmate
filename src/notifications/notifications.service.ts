@@ -172,6 +172,27 @@ export class NotificationsService {
     // No need to send Telegram message here as the request status change will trigger a separate notification
   }
 
+  async notifyRequestRejected(request: CarRequest, reason: string): Promise<void> {
+    const user = await this.usersService.findOne(request.userId);
+
+    const message = `❌ Your car request for ${request.destination} was rejected. Reason: ${reason}`;
+
+    // Notify user via WebSocket
+    this.notificationGateway.sendNotificationToUser(user.id, {
+      type: 'request_rejected',
+      message: 'Your car request was rejected.',
+      data: {
+        requestId: request.id,
+        reason,
+      },
+    });
+
+    // Notify user via Telegram
+    if (user.telegramId) {
+      await this.telegramService.sendMessage(user.telegramId, message);
+    }
+  }
+
   async sendGeneralNotification(userId: string, title: string, message: string): Promise<void> {
     // Get user details
     const user = await this.usersService.findOne(userId);

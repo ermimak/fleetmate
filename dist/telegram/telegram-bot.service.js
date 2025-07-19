@@ -16,12 +16,14 @@ const config_1 = require("@nestjs/config");
 const telegraf_1 = require("telegraf");
 const users_service_1 = require("../users/users.service");
 const requests_service_1 = require("../requests/requests.service");
+const approvals_service_1 = require("../requests/approvals.service");
 const car_request_entity_1 = require("../requests/entities/car-request.entity");
 let TelegramBotService = TelegramBotService_1 = class TelegramBotService {
-    constructor(configService, usersService, requestsService) {
+    constructor(configService, usersService, requestsService, approvalsService) {
         this.configService = configService;
         this.usersService = usersService;
         this.requestsService = requestsService;
+        this.approvalsService = approvalsService;
         this.logger = new common_1.Logger(TelegramBotService_1.name);
         this.userState = new Map();
         const token = this.configService.get('TELEGRAM_BOT_TOKEN');
@@ -80,13 +82,15 @@ let TelegramBotService = TelegramBotService_1 = class TelegramBotService {
                 }
                 let reply = 'Your requests:\n\n';
                 requests.forEach((req) => {
+                    const destination = this.escapeMarkdownV2(req.destination);
+                    const status = this.escapeMarkdownV2(req.status);
+                    const id = this.escapeMarkdownV2(req.id.substring(0, 8) + '...');
                     reply +=
-                        `*Request ID*: ${req.id.substring(0, 8)}...\n` +
-                            `*Destination*: ${req.destination}\n` +
-                            `*Status*: ${this.getStatusEmoji(req.status)} ${req.status}\n` +
-                            '---\n';
+                        `*Request ID*: ${id}\n` +
+                            `*Destination*: ${destination}\n` +
+                            `*Status*: ${this.getStatusEmoji(req.status)} ${status}\n\n`;
                 });
-                await ctx.reply(reply, { parse_mode: 'Markdown' });
+                await ctx.reply(reply, { parse_mode: 'MarkdownV2' });
             }
             catch (error) {
                 this.logger.error(`Error fetching requests: ${error.message}`);
@@ -101,24 +105,50 @@ let TelegramBotService = TelegramBotService_1 = class TelegramBotService {
                     return;
                 }
                 if (!['authority', 'approver', 'admin'].includes(user.role)) {
-                    await ctx.reply('⚠️ You do not have permission to view approvals. Use /myrequests to see your own requests.');
+                    const requests = await this.requestsService.findByUser(user.id);
+                    if (requests.length === 0) {
+                        await ctx.reply("You haven't made any requests yet.");
+                        return;
+                    }
+                    let reply = 'Your requests:\n\n';
+                    requests.forEach((req) => {
+                        const destination = this.escapeMarkdownV2(req.destination);
+                        const status = this.escapeMarkdownV2(req.status);
+                        const id = this.escapeMarkdownV2(req.id.substring(0, 8) + '...');
+                        reply +=
+                            `*Request ID*: ${id}\n` +
+                                `*Destination*: ${destination}\n` +
+                                `*Status*: ${this.getStatusEmoji(req.status)} ${status}\n\n`;
+                    });
+                    await ctx.reply(reply, { parse_mode: 'MarkdownV2' });
                     return;
                 }
                 const pendingApprovals = await this.requestsService.findPendingApprovals(user.id);
                 if (pendingApprovals.length === 0) {
-                    await ctx.reply('✅ No pending approvals.');
+                    await ctx.reply('✅ No pending approvals for you.');
                     return;
                 }
-                let reply = 'Pending approvals:\n\n';
-                pendingApprovals.forEach((req) => {
-                    reply +=
-                        `*Request ID*: ${req.id.substring(0, 8)}...\n` +
-                            `*User*: ${req.user.fullName} (${req.user.email})\n` +
-                            `*Destination*: ${req.destination}\n` +
-                            `*Status*: ${this.getStatusEmoji(req.status)} ${req.status}\n` +
-                            '---\n';
-                });
-                await ctx.reply(reply, { parse_mode: 'Markdown' });
+                await ctx.reply('Pending approvals:');
+                for (const request of pendingApprovals) {
+                    const requestDetails = `*Request ID*: ${this.escapeMarkdownV2(request.id.substring(0, 8) + '...')}\n` +
+                        `*User*: ${this.escapeMarkdownV2(request.user.fullName + ' (' + request.user.email + ')')}\n` +
+                        `*Destination*: ${this.escapeMarkdownV2(request.destination)}\n` +
+                        `*Purpose*: ${this.escapeMarkdownV2(request.purpose)}\n` +
+                        `*Departure*: ${this.escapeMarkdownV2(new Date(request.departureDateTime).toLocaleString())}\n` +
+                        `*Return*: ${this.escapeMarkdownV2(request.returnDateTime ? new Date(request.returnDateTime).toLocaleString() : 'N/A')}\n` +
+                        `*Priority*: ${this.escapeMarkdownV2(request.priority)}\n` +
+                        `*Status*: ${this.getStatusEmoji(request.status)} ${this.escapeMarkdownV2(request.status)}`;
+                    await ctx.reply(requestDetails, {
+                        reply_markup: {
+                            inline_keyboard: [
+                                [
+                                    { text: '✅ Approve', callback_data: `approve:${request.id}` },
+                                    { text: '❌ Reject', callback_data: `reject:${request.id}` },
+                                ],
+                            ],
+                        },
+                    });
+                }
             }
             catch (error) {
                 this.logger.error(`Error fetching approvals: ${error.message}`);
@@ -151,6 +181,50 @@ let TelegramBotService = TelegramBotService_1 = class TelegramBotService {
             await ctx.reply('🚗 Creating a new car request...\n\nPlease provide the following information:\n\n1️⃣ **Destination**: Where do you need to go?');
         });
         this.bot.on('text', (ctx) => this.handleTextMessage(ctx));
+        this.bot.action(/approve:(.+)/, async (ctx) => {
+            try {
+                const user = await this.usersService.findByTelegramId(ctx.from.id.toString());
+                if (!user) {
+                    await ctx.reply('❌ Your Telegram account is not linked. Please use /link first.');
+                    return;
+                }
+                const requestId = ctx.match[1];
+                const approvals = await this.approvalsService.findByRequest(requestId);
+                const pendingApproval = approvals.find(a => a.approverId === user.id && a.status === 'pending');
+                if (!pendingApproval) {
+                    await ctx.editMessageText('⚠️ This request is no longer pending your approval.');
+                    return;
+                }
+                await this.approvalsService.approve(pendingApproval.id);
+                await ctx.editMessageText(`✅ Request ${requestId.substring(0, 8)}... approved.`);
+            }
+            catch (error) {
+                this.logger.error(`Error approving request: ${error.message}`);
+                await ctx.reply(`❌ Failed to approve request. Reason: ${error.message}`);
+            }
+        });
+        this.bot.action(/reject:(.+)/, async (ctx) => {
+            try {
+                const user = await this.usersService.findByTelegramId(ctx.from.id.toString());
+                if (!user) {
+                    await ctx.reply('❌ Your Telegram account is not linked. Please use /link first.');
+                    return;
+                }
+                const requestId = ctx.match[1];
+                const approvals = await this.approvalsService.findByRequest(requestId);
+                const pendingApproval = approvals.find(a => a.approverId === user.id && a.status === 'pending');
+                if (!pendingApproval) {
+                    await ctx.editMessageText('⚠️ This request is no longer pending your approval.');
+                    return;
+                }
+                await this.approvalsService.reject(pendingApproval.id, 'Rejected via Telegram bot');
+                await ctx.editMessageText(`❌ Request ${requestId.substring(0, 8)}... rejected.`);
+            }
+            catch (error) {
+                this.logger.error(`Error rejecting request: ${error.message}`);
+                await ctx.reply(`❌ Failed to reject request. Reason: ${error.message}`);
+            }
+        });
         this.bot.launch();
         this.logger.log('Telegram bot started');
         process.once('SIGINT', () => this.bot.stop('SIGINT'));
@@ -299,25 +373,38 @@ let TelegramBotService = TelegramBotService_1 = class TelegramBotService {
             case car_request_entity_1.RequestStatus.SUBMITTED:
                 return '📝';
             case car_request_entity_1.RequestStatus.UNDER_REVIEW:
-                return '👀';
             case car_request_entity_1.RequestStatus.ELIGIBLE:
-                return '👍';
+                return '👀';
             case car_request_entity_1.RequestStatus.APPROVED:
-                return '✅';
-            case car_request_entity_1.RequestStatus.REJECTED:
-                return '❌';
-            case car_request_entity_1.RequestStatus.INELIGIBLE:
-                return '🚫';
             case car_request_entity_1.RequestStatus.CAR_ASSIGNED:
-                return '🚗';
+                return '✅';
             case car_request_entity_1.RequestStatus.IN_PROGRESS:
-                return '🏃‍♂️';
+                return '🚀';
             case car_request_entity_1.RequestStatus.COMPLETED:
                 return '🏁';
+            case car_request_entity_1.RequestStatus.REJECTED:
+            case car_request_entity_1.RequestStatus.INELIGIBLE:
             case car_request_entity_1.RequestStatus.CANCELLED:
-                return '🛑';
+                return '❌';
             default:
                 return '❓';
+        }
+    }
+    escapeMarkdownV2(text) {
+        if (!text)
+            return '';
+        return text.replace(/([\_\*\`\{\}\[\]\(\)\#\+\-\=\|\!\.\>])/g, '\\$1');
+    }
+    async sendMessage(chatId, text, parseMode) {
+        try {
+            const extra = {};
+            if (parseMode) {
+                extra.parse_mode = parseMode;
+            }
+            await this.bot.telegram.sendMessage(chatId, text, extra);
+        }
+        catch (error) {
+            this.logger.error(`Failed to send message to ${chatId}: ${error.message}`);
         }
     }
 };
@@ -326,6 +413,7 @@ exports.TelegramBotService = TelegramBotService = TelegramBotService_1 = __decor
     (0, common_1.Injectable)(),
     __metadata("design:paramtypes", [config_1.ConfigService,
         users_service_1.UsersService,
-        requests_service_1.RequestsService])
+        requests_service_1.RequestsService,
+        approvals_service_1.ApprovalsService])
 ], TelegramBotService);
 //# sourceMappingURL=telegram-bot.service.js.map

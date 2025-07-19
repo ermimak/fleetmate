@@ -7,6 +7,8 @@ import { CreateApprovalDto } from './dto/create-approval.dto';
 import { UpdateApprovalDto } from './dto/update-approval.dto';
 import { CarRequest, RequestStatus } from './entities/car-request.entity';
 import { NotificationsService } from '../notifications/notifications.service';
+import { UsersService } from '../users/users.service';
+import { UserRole } from '../users/entities/user.entity';
 
 @Injectable()
 export class ApprovalsService {
@@ -16,6 +18,7 @@ export class ApprovalsService {
     @InjectRepository(CarRequest)
     private requestRepository: Repository<CarRequest>,
     private notificationsService: NotificationsService,
+    private usersService: UsersService,
   ) {}
 
   async createApproval(createApprovalDto: CreateApprovalDto): Promise<Approval> {
@@ -149,27 +152,25 @@ export class ApprovalsService {
     
     // Notify about the rejection
     await this.notificationsService.notifyApprovalDecision(updatedApproval, false);
+    await this.notificationsService.notifyRequestRejected(updatedApproval.request, comments);
     
     return updatedApproval;
   }
 
   private async createFinalApproval(requestId: string): Promise<void> {
-    // Find an admin or fleet manager to assign the final approval
-    // This is simplified - in a real app, you'd have logic to determine the right approver
-    const request = await this.requestRepository.findOne({
-      where: { id: requestId },
-      relations: ['user'],
-    });
-    
-    if (!request) {
-      throw new NotFoundException('Request not found');
+    const admins = await this.usersService.findByRole(UserRole.ADMIN);
+    if (!admins.length) {
+      // Fallback or error handling if no admin is found
+      console.error('No admin user found to assign final approval.');
+      // Optionally, assign to a default user or handle as an error
+      return;
     }
-    
-    // For demo purposes, we'll assign to the same manager for final approval
-    // In a real app, you'd have different roles for different approval stages
+    // Assign to the first available admin
+    const adminApproverId = admins[0].id;
+
     await this.createApproval({
       requestId,
-      approverId: request.user.managerId, // This should be a fleet manager or admin in real app
+      approverId: adminApproverId,
       type: ApprovalType.FINAL_APPROVAL,
     });
   }

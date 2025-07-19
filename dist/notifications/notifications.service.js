@@ -130,6 +130,21 @@ let NotificationsService = class NotificationsService {
             },
         });
     }
+    async notifyRequestRejected(request, reason) {
+        const user = await this.usersService.findOne(request.userId);
+        const message = `❌ Your car request for ${request.destination} was rejected. Reason: ${reason}`;
+        this.notificationGateway.sendNotificationToUser(user.id, {
+            type: 'request_rejected',
+            message: 'Your car request was rejected.',
+            data: {
+                requestId: request.id,
+                reason,
+            },
+        });
+        if (user.telegramId) {
+            await this.telegramService.sendMessage(user.telegramId, message);
+        }
+    }
     async sendGeneralNotification(userId, title, message) {
         const user = await this.usersService.findOne(userId);
         this.notificationGateway.sendNotificationToUser(user.id, {
