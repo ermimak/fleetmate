@@ -1,6 +1,7 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, OneToMany } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, OneToMany, ManyToOne, JoinColumn } from 'typeorm';
 import { CarRequest } from '../../requests/entities/car-request.entity';
 import { Approval } from '../../requests/entities/approval.entity';
+import { Department } from '../../departments/entities/department.entity';
 
 export enum UserRole {
   USER = 'user',
@@ -32,8 +33,8 @@ export class User {
   @Column()
   lastName: string;
 
-  @Column()
-  department: string;
+  @ManyToOne(() => Department, department => department.users)
+  department: Department;
 
   @Column()
   position: string;
@@ -61,8 +62,15 @@ export class User {
   })
   status: UserStatus;
 
+  @ManyToOne(() => User, user => user.managedUsers, { nullable: true })
+  @JoinColumn({ name: 'managerId' })
+  manager: User;
+
   @Column({ nullable: true })
   managerId: string;
+
+  @OneToMany(() => User, user => user.manager)
+  managedUsers: User[];
 
   @CreateDateColumn()
   createdAt: Date;

@@ -168,10 +168,13 @@ export class ApprovalsService {
     // Assign to the first available admin
     const adminApproverId = admins[0].id;
 
-    await this.createApproval({
+    const finalApproval = await this.createApproval({
       requestId,
       approverId: adminApproverId,
       type: ApprovalType.FINAL_APPROVAL,
     });
+
+    // Notify the admin about the new final approval task
+    await this.notificationsService.notifyApprovalAssigned(finalApproval);
   }
 }

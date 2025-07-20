@@ -17,7 +17,7 @@ export class RegisterDto {
   lastName: string;
 
   @IsNotEmpty()
-  department: string;
+  departmentId: string;
 
   @IsNotEmpty()
   position: string;

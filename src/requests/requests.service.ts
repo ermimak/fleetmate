@@ -11,7 +11,7 @@ import { DriverStatus } from '../cars/entities/driver.entity';
 import { UsersService } from '../users/users.service';
 import { ApprovalsService } from './approvals.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { ApprovalType } from './entities/approval.entity';
+import { ApprovalStatus, ApprovalType } from './entities/approval.entity';
 
 @Injectable()
 export class RequestsService {
@@ -106,12 +106,14 @@ export class RequestsService {
   }
 
   async findPendingApprovals(approverId: string): Promise<CarRequest[]> {
+    // This method should find car requests that have a pending approval assigned to the given approverId.
     const query = this.requestRepository.createQueryBuilder('request')
-      .leftJoinAndSelect('request.approvals', 'approval')
+      .innerJoin('request.approvals', 'approval', 
+        'approval.approverId = :approverId AND approval.status = :status', 
+        { approverId, status: ApprovalStatus.PENDING })
       .leftJoinAndSelect('request.user', 'user')
-      .where('approval.approverId = :approverId', { approverId })
-      .andWhere('approval.status = :status', { status: 'pending' });
-      
+      .orderBy('request.createdAt', 'DESC');
+
     return query.getMany();
   }
 

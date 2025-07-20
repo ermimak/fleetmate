@@ -1,0 +1,25 @@
+<h2>Pending Approvals</h2>
+
+<div *ngIf="(pendingApprovals$ | async) as requests; else loading">
+  <ul *ngIf="requests.length > 0; else noApprovals" class="approvals-list">
+    <li *ngFor="let request of requests" class="approval-item">
+      <div class="request-info">
+        <span><strong>Destination:</strong> {{ request.destination }}</span>
+        <span><strong>Status:</strong> {{ request.status }}</span>
+      </div>
+      <div class="actions" *ngIf="canPerformActions">
+        <button class="btn btn-approve" (click)="approve(request)">Approve</button>
+        <button class="btn btn-reject" (click)="reject(request)">Reject</button>
+      </div>
+    </li>
+  </ul>
+
+  <ng-template #noApprovals>
+    <p>No pending approvals at the moment.</p>
+  </ng-template>
+</div>
+
+<ng-template #loading>
+  <p>Loading pending approvals...</p>
+</ng-template>
+
