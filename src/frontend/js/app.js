@@ -1,1197 +1,731 @@
-// --- Persistent Logging --- //
-const LOG_KEY = 'app_debug_logs';
-const MAX_LOG_ENTRIES = 50;
+// FleetMate Frontend Application
+// Comprehensive fleet management system
 
-function logToStorage(level, ...args) {
-    try {
-        // Get existing logs
-        const logs = JSON.parse(localStorage.getItem(LOG_KEY) || '[]');
-        
-        // Add new log entry
-        logs.push({
-            timestamp: new Date().toISOString(),
-            level,
-            message: args.map(arg => 
-                typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
-            ).join(' ')
-        });
-        
-        // Keep only the most recent logs
-        while (logs.length > MAX_LOG_ENTRIES) {
-            logs.shift();
-        }
-        
-        // Save back to storage
-        localStorage.setItem(LOG_KEY, JSON.stringify(logs));
-        
-        // Also log to console
-        console[level](...args);
-    } catch (e) {
-        console.error('Error writing to log storage:', e);
+// --- Configuration --- //
+const API_BASE_URL = '/api';
+const TOKEN_KEY = 'authToken';
+const USER_KEY = 'userData';
+
+// --- Utility Functions --- //
+function showLoading(elementId) {
+    const element = document.getElementById(elementId);
+    if (element) {
+        const loading = element.querySelector('.loading');
+        if (loading) loading.classList.remove('d-none');
     }
 }
 
-function clearLogs() {
-    localStorage.removeItem(LOG_KEY);
+function hideLoading(elementId) {
+    const element = document.getElementById(elementId);
+    if (element) {
+        const loading = element.querySelector('.loading');
+        if (loading) loading.classList.add('d-none');
+    }
 }
 
-function getLogs() {
-    try {
-        return JSON.parse(localStorage.getItem(LOG_KEY) || '[]');
-    } catch (e) {
-        return [];
+function showAlert(message, type = 'info', containerId = null) {
+    const alertHtml = `
+        <div class="alert alert-${type} alert-dismissible fade show" role="alert">
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+    `;
+    
+    const container = containerId ? document.getElementById(containerId) : document.querySelector('.main-content');
+    if (container) {
+        container.insertAdjacentHTML('afterbegin', alertHtml);
+        // Auto-dismiss after 5 seconds
+        setTimeout(() => {
+            const alert = container.querySelector('.alert');
+            if (alert) alert.remove();
+        }, 5000);
     }
+}
+
+function formatDate(dateString) {
+    return new Date(dateString).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+}
+
+function getStatusBadge(status) {
+    const statusMap = {
+        'pending': 'badge-warning',
+        'approved': 'badge-success',
+        'rejected': 'badge-danger',
+        'cancelled': 'badge-secondary',
+        'car_assigned': 'badge-info',
+        'in_progress': 'badge-info',
+        'completed': 'badge-success',
+        'active': 'badge-success',
+        'inactive': 'badge-secondary',
+        'suspended': 'badge-danger',
+        'available': 'badge-success',
+        'in_use': 'badge-warning',
+        'maintenance': 'badge-danger',
+        'out_of_service': 'badge-secondary'
+    };
+    
+    const badgeClass = statusMap[status.toLowerCase()] || 'badge-secondary';
+    return `<span class="badge ${badgeClass}">${status.replace('_', ' ').toUpperCase()}</span>`;
 }
 
 // --- API Service --- //
 class ApiService {
-    constructor(baseUrl = '') {
+    constructor(baseUrl = API_BASE_URL) {
         this.baseUrl = baseUrl;
-        this.token = localStorage.getItem('authToken');
+        this.token = localStorage.getItem(TOKEN_KEY);
     }
 
     setToken(token) {
-        this.token = token;
         if (token) {
-            localStorage.setItem('authToken', token);
+            this.token = token;
+            localStorage.setItem(TOKEN_KEY, token);
         } else {
-            localStorage.removeItem('authToken');
+            this.token = null;
+            localStorage.removeItem(TOKEN_KEY);
+            localStorage.removeItem(USER_KEY);
         }
     }
 
     async request(endpoint, options = {}) {
         const url = `${this.baseUrl}${endpoint}`;
-        const headers = {
-            'Content-Type': 'application/json',
-            ...options.headers,
+        const config = {
+            headers: {
+                'Content-Type': 'application/json',
+                ...(this.token && { 'Authorization': `Bearer ${this.token}` }),
+                ...options.headers,
+            },
+            ...options,
         };
 
-        if (this.token) {
-            headers['Authorization'] = `Bearer ${this.token}`;
+        if (config.body && typeof config.body === 'object') {
+            config.body = JSON.stringify(config.body);
         }
 
         try {
-            const response = await fetch(url, {
-                ...options,
-                headers,
-                body: options.body ? JSON.stringify(options.body) : null,
-            });
-
-            if (response.status === 401) {
-                this.logout();
-                throw new Error('Unauthorized');
-            }
-
-            const data = await response.json().catch(() => ({}));
-
+            const response = await fetch(url, config);
+            
             if (!response.ok) {
-                const errorMessage = data.message || 'Something went wrong';
-                console.error('API Error Response:', data);
-                throw new Error(errorMessage);
+                if (response.status === 401) {
+                    this.logout();
+                    return;
+                }
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
             }
 
-            return data;
+            const contentType = response.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+                return await response.json();
+            }
+            return await response.text();
         } catch (error) {
-            console.error('API Request Failed:', error);
+            console.error('API request failed:', error);
             throw error;
         }
     }
 
+    // Authentication
     async login(credentials) {
         try {
-            logToStorage('log', 'Attempting login with credentials:', { email: credentials.email });
-            const response = await fetch('/api/auth/login', {
+            const response = await this.request('/auth/login', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(credentials)
+                body: credentials
             });
             
-            const responseData = await response.json().catch(() => ({}));
-            
-            if (!response.ok) {
-                logToStorage('error', 'Login failed with status:', response.status, 'Response:', responseData);
-                throw new Error(responseData.message || 'Login failed. Please check your credentials and try again.');
-            }
-            
-            logToStorage('log', 'Login successful, response data:', { 
-                hasToken: !!responseData.access_token,
-                tokenLength: responseData.access_token ? responseData.access_token.length : 0
-            });
-            
-            if (!responseData.access_token) {
-                logToStorage('error', 'No access token in response:', responseData);
-                throw new Error('No access token received from server');
-            }
-            
-            // Store the token and update the API service
-            this.setToken(responseData.access_token);
-            localStorage.setItem('authToken', responseData.access_token);
-            
-            try {
-                // Fetch user profile after login
-                logToStorage('log', 'Fetching user profile...');
+            if (response.access_token) {
+                this.setToken(response.access_token);
                 const user = await this.getMe();
-                
-                if (!user) {
-                    throw new Error('Failed to load user profile');
-                }
-                
-                logToStorage('log', 'User profile loaded successfully:', { 
-                    id: user.id,
-                    email: user.email,
-                    role: user.role,
-                    name: user.firstName ? `${user.firstName} ${user.lastName || ''}`.trim() : 'Unknown'
-                });
-                
-                // Store user data in localStorage
-                localStorage.setItem('userData', JSON.stringify(user));
-                if (user.role) {
-                    localStorage.setItem('userRole', user.role);
-                }
-                
+                localStorage.setItem(USER_KEY, JSON.stringify(user));
                 return user;
-            } catch (profileError) {
-                logToStorage('error', 'Error fetching user profile after login:', profileError);
-                // Clear the token if we couldn't fetch the profile
-                this.logout();
-                throw new Error('Failed to load user profile. Please try again.');
             }
+            throw new Error('No access token received');
         } catch (error) {
-            logToStorage('error', 'Login error:', error);
+            console.error('Login failed:', error);
             throw error;
         }
     }
 
     async getMe() {
-        try {
-            logToStorage('log', 'Fetching user profile from /api/users/me');
-            const response = await fetch('/api/users/me', {
-                headers: {
-                    'Authorization': `Bearer ${this.token}`,
-                    'Content-Type': 'application/json'
-                }
-            });
-            
-            if (!response.ok) {
-                const error = await response.json().catch(() => ({}));
-                logToStorage('error', 'Failed to fetch user profile:', error);
-                throw new Error(error.message || 'Failed to fetch user profile');
-            }
-            
-            const userData = await response.json();
-            logToStorage('log', 'User profile data received:', { 
-                id: userData.id,
-                email: userData.email,
-                role: userData.role
-            });
-            return userData;
-        } catch (error) {
-            logToStorage('error', 'Error in getMe:', error);
-            throw error;
-        }
+        return await this.request('/users/me');
     }
 
     isAuthenticated() {
-        const token = localStorage.getItem('authToken');
-        // Only check for token, as user data might be loaded after authentication
-        return !!token;
+        return !!this.token;
     }
 
     getCurrentUser() {
-        const userData = localStorage.getItem('userData');
-        return userData ? JSON.parse(userData) : null;
-    }
-
-    hasRole(requiredRole) {
-        const user = this.getCurrentUser();
-        if (!user) return false;
-        return user.role === requiredRole || user.role === 'ADMIN';
+        try {
+            const userData = localStorage.getItem(USER_KEY);
+            return userData ? JSON.parse(userData) : null;
+        } catch {
+            return null;
+        }
     }
 
     logout() {
         this.setToken(null);
-        window.location.href = '/login.html';
+        window.location.replace('/login.html');
     }
 
-    getCurrentUser() {
-        return this.request('/users/me');
+    // Users API
+    async getUsers(filters = {}) {
+        const params = new URLSearchParams(filters);
+        return await this.request(`/users?${params}`);
     }
 
-    getMyRequests() {
-        return this.request('/requests/my-requests');
+    async getUserById(id) {
+        return await this.request(`/users/${id}`);
     }
 
-    createRequest(data) {
-        return this.request('/requests', { method: 'POST', body: data });
+    async createUser(userData) {
+        return await this.request('/users', {
+            method: 'POST',
+            body: userData
+        });
     }
 
-    getRequestById(id) {
-        return this.request(`/requests/${id}`);
+    async updateUser(id, userData) {
+        return await this.request(`/users/${id}`, {
+            method: 'PATCH',
+            body: userData
+        });
     }
 
-    cancelRequest(id, reason) {
-        return this.request(`/requests/${id}/cancel`, { method: 'PATCH', body: { reason } });
+    async deleteUser(id) {
+        return await this.request(`/users/${id}`, {
+            method: 'DELETE'
+        });
     }
 
-    // --- Admin/Authority Methods ---
-    getAllRequests(filters = {}) {
-        const query = new URLSearchParams(filters).toString();
-        return this.request(`/requests?${query}`);
+    async getUserStats() {
+        return await this.request('/users/stats');
     }
 
-    getPendingApprovals() {
-        return this.request('/requests/pending-approvals');
+    // Requests API
+    async getMyRequests() {
+        return await this.request('/requests/my-requests');
     }
 
-    updateRequestStatus(id, status, reason = '') {
-        return this.request(`/requests/${id}/status`, { method: 'PATCH', body: { status, reason } });
+    async getAllRequests(filters = {}) {
+        const params = new URLSearchParams(filters);
+        return await this.request(`/requests?${params}`);
     }
 
-    getAvailableCars(passengerCount) {
-        return this.request(`/cars/available?passengerCount=${passengerCount}`);
+    async getRequestById(id) {
+        return await this.request(`/requests/${id}`);
     }
 
-    getAvailableDrivers() {
-        return this.request('/drivers/available');
+    async createRequest(requestData) {
+        return await this.request('/requests', {
+            method: 'POST',
+            body: requestData
+        });
     }
 
-    assignCarToRequest(requestId, carId, driverId) {
-        return this.request(`/requests/${requestId}/assign-car`, { method: 'PATCH', body: { carId, driverId } });
+    async updateRequestStatus(id, status, reason = '') {
+        return await this.request(`/requests/${id}/status`, {
+            method: 'PATCH',
+            body: { status, reason }
+        });
     }
 
-    startTrip(requestId) {
-        return this.request(`/requests/${requestId}/start-trip`, { method: 'PATCH' });
+    async assignCar(requestId, carId, driverId) {
+        return await this.request(`/requests/${requestId}/assign-car`, {
+            method: 'PATCH',
+            body: { carId, driverId }
+        });
     }
 
-    completeTrip(requestId, totalDistance, tripNotes) {
-        return this.request(`/requests/${requestId}/complete-trip`, { method: 'PATCH', body: { totalDistance, tripNotes } });
+    async startTrip(requestId) {
+        return await this.request(`/requests/${requestId}/start-trip`, {
+            method: 'PATCH'
+        });
     }
 
-    getRequestStats() {
-        return this.request('/requests/stats');
+    async completeTrip(requestId, totalDistance, tripNotes) {
+        return await this.request(`/requests/${requestId}/complete-trip`, {
+            method: 'PATCH',
+            body: { totalDistance, tripNotes }
+        });
     }
 
-    getOverdueRequests() {
-        return this.request('/requests/overdue');
+    async getPendingApprovals() {
+        return await this.request('/requests/pending-approvals');
     }
 
-    // User Management
-    getUsers() {
-        return this.request('/users');
+    async getRequestStats() {
+        return await this.request('/requests/stats');
     }
 
-    getUserById(userId) {
-        return this.request(`/users/${userId}`);
+    async getOverdueRequests() {
+        return await this.request('/requests/overdue');
     }
 
-    createUser(userData) {
-        return this.request('/users', { method: 'POST', body: userData });
+    // Cars API
+    async getCars(filters = {}) {
+        const params = new URLSearchParams(filters);
+        return await this.request(`/cars?${params}`);
     }
 
-    updateUser(userId, userData) {
-        return this.request(`/users/${userId}`, { method: 'PATCH', body: userData });
+    async getAvailableCars(passengerCount, type) {
+        const params = new URLSearchParams({ passengerCount, type });
+        return await this.request(`/cars/available?${params}`);
     }
 
-    deleteUser(userId) {
-        return this.request(`/users/${userId}`, { method: 'DELETE' });
+    async getCarById(id) {
+        return await this.request(`/cars/${id}`);
+    }
+
+    async createCar(carData) {
+        return await this.request('/cars', {
+            method: 'POST',
+            body: carData
+        });
+    }
+
+    async updateUser(id, carData) {
+        return await this.request(`/cars/${id}`, {
+            method: 'PATCH',
+            body: carData
+        });
+    }
+
+    async deleteCar(id) {
+        return await this.request(`/cars/${id}`, {
+            method: 'DELETE'
+        });
+    }
+
+    async getCarStats() {
+        return await this.request('/cars/stats');
+    }
+
+    async assignDriver(carId, driverId) {
+        return await this.request(`/cars/${carId}/assign-driver/${driverId}`, {
+            method: 'PATCH'
+        });
+    }
+
+    async unassignDriver(carId) {
+        return await this.request(`/cars/${carId}/unassign-driver`, {
+            method: 'PATCH'
+        });
     }
 }
 
-// --- App State --- //
+// --- Application State --- //
 const state = {
     currentUser: null,
+    currentPage: null,
+    isLoading: false
 };
 
 // --- Initialize API Service --- //
-const api = new ApiService('/api');
+const api = new ApiService();
 
-// --- Rendering --- //
-function renderAppLayout() {
-    const app = document.getElementById('app');
-    if (!app) return;
-
-    app.innerHTML = `
-        <header class="navbar navbar-dark sticky-top bg-dark flex-md-nowrap p-0 shadow">
-            <a class="navbar-brand col-md-3 col-lg-2 me-0 px-3" href="#">FleetMate</a>
-            <div class="navbar-nav">
-                <div class="nav-item text-nowrap">
-                    <a id="logoutButton" class="nav-link px-3" href="#">Sign out</a>
-                </div>
-            </div>
-        </header>
-        <div class="container-fluid">
-            <div class="row">
-                <nav id="sidebarMenu" class="col-md-3 col-lg-2 d-md-block bg-light sidebar collapse">
-                    <div class="position-sticky pt-3">
-                        <ul class="nav flex-column">
-                            <li class="nav-item">
-                                <a class="nav-link" href="/dashboard.html">Dashboard</a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link" href="/requests.html">My Requests</a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link" href="/new-request.html">New Request</a>
-                            </li>
-                        </ul>
-
-                        ${['ADMIN', 'AUTHORITY', 'APPROVER'].includes(state.currentUser.role) ? `
-                        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted">
-                          <span>Management</span>
-                        </h6>
-                        <ul class="nav flex-column mb-2">
-                          ${state.currentUser.role === 'ADMIN' ? `
-                          <li class="nav-item">
-                            <a class="nav-link" href="/user-management.html">User Management</a>
-                          </li>
-                          ` : ''}
-                          <li class="nav-item">
-                            <a class="nav-link" href="/manage-requests.html">Manage Requests</a>
-                          </li>
-                          <li class="nav-item">
-                            <a class="nav-link" href="/pending-approvals.html">Pending Approvals</a>
-                          </li>
-                          <li class="nav-item">
-                            <a class="nav-link" href="/statistics.html">Statistics</a>
-                          </li>
-                          <li class="nav-item">
-                            <a class="nav-link" href="/overdue-requests.html">Overdue Requests</a>
-                          </li>
-                        </ul>
-                        ` : ''}
-
-                    </div>
-                </nav>
-                <main id="main-content" class="col-md-9 ms-sm-auto col-lg-10 px-md-4">
-                    <!-- Dynamic content will be loaded here -->
-                </main>
-            </div>
-        </div>
-        <div id="form-modal-container"></div>
-    `;
-    document.getElementById('logoutButton').addEventListener('click', (e) => {
-        e.preventDefault();
-        api.logout();
-    });
-}
-
-function renderContent(title, content) {
-    const mainContent = document.getElementById('main-content');
-    if (mainContent) {
-        mainContent.innerHTML = `
-            <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
-                <h1 class="h2">${title}</h1>
-            </div>
-            ${content}
-        `;
-    }
-}
-
-// --- Page Handlers --- //
-const pages = {
-    '/dashboard.html': () => {
-        renderContent('Dashboard', `<p>Welcome, ${state.currentUser.firstName}! Use the navigation to manage your requests.</p>`);
-    },
-    '/requests.html': async () => {
-        renderContent('My Requests', '<p>Loading requests...</p>');
-        try {
-            const requests = await api.getMyRequests();
-            let requestsHtml = '<ul class="list-group">';
-            if (requests.length === 0) {
-                requestsHtml += '<li class="list-group-item">No requests found.</li>';
-            } else {
-                requests.forEach(req => {
-                    requestsHtml += `
-                        <li class="list-group-item d-flex justify-content-between align-items-center">
-                            <div>
-                                <strong>Destination:</strong> ${req.destination} <br>
-                                <strong>Status:</strong> <span class="badge bg-info">${req.status}</span>
-                            </div>
-                            <div>
-                                <button class="btn btn-sm btn-primary view-details-btn" data-request-id="${req.id}">Details</button>
-                                <button class="btn btn-sm btn-danger cancel-request-btn" data-request-id="${req.id}" ${req.status !== 'PENDING' ? 'disabled' : ''}>Cancel</button>
-                            </div>
-                        </li>`;
-                });
-            }
-            requestsHtml += '</ul>';
-            renderContent('My Requests', requestsHtml);
-            addRequestActionListeners(); // Attach listeners after rendering
-        } catch (error) {
-            renderContent('My Requests', '<p class="text-danger">Failed to load requests.</p>');
-        }
-    },
-    '/new-request.html': () => {
-        const formHtml = `
-            <form id="newRequestForm">
-                <div class="mb-3">
-                    <label for="purpose" class="form-label">Purpose of Trip</label>
-                    <input type="text" class="form-control" id="purpose" required>
-                </div>
-                <div class="mb-3">
-                    <label for="destination" class="form-label">Destination</label>
-                    <input type="text" class="form-control" id="destination" required>
-                </div>
-                <div class="row">
-                    <div class="col-md-6 mb-3">
-                        <label for="departureDateTime" class="form-label">Departure Date & Time</label>
-                        <input type="datetime-local" class="form-control" id="departureDateTime" required>
-                    </div>
-                    <div class="col-md-6 mb-3">
-                        <label for="returnDateTime" class="form-label">Return Date & Time</label>
-                        <input type="datetime-local" class="form-control" id="returnDateTime">
-                    </div>
-                </div>
-                <div class="mb-3">
-                    <label for="passengerCount" class="form-label">Number of Passengers</label>
-                    <input type="number" class="form-control" id="passengerCount" min="1" max="50" required>
-                </div>
-                <div class="mb-3">
-                    <label for="additionalNotes" class="form-label">Additional Notes</label>
-                    <textarea class="form-control" id="additionalNotes" rows="3"></textarea>
-                </div>
-                <button type="submit" class="btn btn-primary">Submit Request</button>
-                <div id="form-error" class="mt-3 text-danger"></div>
-            </form>
-        `;
-        renderContent('New Request', formHtml);
-        
-        const newRequestForm = document.getElementById('newRequestForm');
-        if (newRequestForm) {
-            newRequestForm.addEventListener('submit', async (e) => {
-                e.preventDefault();
-                const errorDiv = document.getElementById('form-error');
-                errorDiv.textContent = '';
-                
-                const requestData = {
-                    purpose: document.getElementById('purpose').value,
-                    destination: document.getElementById('destination').value,
-                    departureDateTime: document.getElementById('departureDateTime').value,
-                    returnDateTime: document.getElementById('returnDateTime').value || null,
-                    passengerCount: parseInt(document.getElementById('passengerCount').value, 10),
-                    additionalNotes: document.getElementById('additionalNotes').value,
-                };
-
-                try {
-                    await api.createRequest(requestData);
-                    alert('Request created successfully!');
-                    window.location.href = '/requests.html';
-                } catch (error) {
-                    errorDiv.textContent = `Failed to create request: ${error.message}`;
-                }
-            });
-        }
-    },
-    '/404.html': () => {
-        renderContent('404 Not Found', '<p>The page you are looking for does not exist.</p>');
-    },
-    '/request-details.html': async () => {
-        const urlParams = new URLSearchParams(window.location.search);
-        const requestId = urlParams.get('id');
-        if (!requestId) {
-            renderContent('Error', '<p>No request ID provided.</p>');
-            return;
-        }
-
-        renderContent('Request Details', '<p>Loading details...</p>');
-        try {
-            const request = await api.getRequestById(requestId);
-            let detailsHtml = `
-                <div class="card">
-                    <div class="card-header">Request Details</div>
-                    <ul class="list-group list-group-flush">
-                        <li class="list-group-item"><strong>ID:</strong> ${request.id}</li>
-                        <li class="list-group-item"><strong>Purpose:</strong> ${request.purpose}</li>
-                        <li class="list-group-item"><strong>Destination:</strong> ${request.destination}</li>
-                        <li class="list-group-item"><strong>Status:</strong> <span class="badge bg-info">${request.status}</span></li>
-                        <li class="list-group-item"><strong>Departure:</strong> ${new Date(request.departureDateTime).toLocaleString()}</li>
-                        <li class="list-group-item"><strong>Return:</strong> ${request.returnDateTime ? new Date(request.returnDateTime).toLocaleString() : 'N/A'}</li>
-                        <li class="list-group-item"><strong>Passengers:</strong> ${request.passengerCount}</li>
-                        <li class="list-group-item"><strong>Notes:</strong> ${request.additionalNotes || 'None'}</li>
-                    </ul>
-                </div>
-            `;
-
-            // Show assignment form for admins/authorities on approved requests
-            if (request.status === 'APPROVED' && ['ADMIN', 'AUTHORITY'].includes(state.currentUser.role)) {
-                const [cars, drivers] = await Promise.all([
-                    api.getAvailableCars(request.passengerCount),
-                    api.getAvailableDrivers()
-                ]);
-
-                detailsHtml += `
-                    <div class="card mt-4">
-                        <div class="card-header">Assign Vehicle</div>
-                        <div class="card-body">
-                            <form id="assignVehicleForm">
-                                <div class="mb-3">
-                                    <label for="carId" class="form-label">Select Car</label>
-                                    <select id="carId" class="form-select" required>
-                                        <option value="">Choose a car...</option>
-                                        ${cars.map(car => `<option value="${car.id}">${car.make} ${car.model} (${car.licensePlate})</option>`).join('')}
-                                    </select>
-                                </div>
-                                <div class="mb-3">
-                                    <label for="driverId" class="form-label">Select Driver</label>
-                                    <select id="driverId" class="form-select" required>
-                                        <option value="">Choose a driver...</option>
-                                        ${drivers.map(driver => `<option value="${driver.id}">${driver.firstName} ${driver.lastName}</option>`).join('')}
-                                    </select>
-                                </div>
-                                <button type="submit" class="btn btn-success">Assign</button>
-                            </form>
-                        </div>
-                    </div>
-                `;
-            }
-
-            // Show trip management for admins/authorities
-            if (['ADMIN', 'AUTHORITY'].includes(state.currentUser.role)) {
-                if (request.status === 'CAR_ASSIGNED') {
-                    detailsHtml += `<button id="startTripBtn" class="btn btn-info mt-3">Start Trip</button>`;
-                } else if (request.status === 'IN_PROGRESS') {
-                    detailsHtml += `
-                        <div class="card mt-4">
-                            <div class="card-header">Complete Trip</div>
-                            <div class="card-body">
-                                <form id="completeTripForm">
-                                    <div class="mb-3">
-                                        <label for="totalDistance" class="form-label">Total Distance (km)</label>
-                                        <input type="number" id="totalDistance" class="form-control" required>
-                                    </div>
-                                    <div class="mb-3">
-                                        <label for="tripNotes" class="form-label">Trip Notes</label>
-                                        <textarea id="tripNotes" class="form-control" rows="3"></textarea>
-                                    </div>
-                                    <button type="submit" class="btn btn-warning">Complete Trip</button>
-                                </form>
-                            </div>
-                        </div>
-                    `;
-                }
-            }
-
-            detailsHtml += '<a href="/requests.html" class="btn btn-primary mt-3">Back to My Requests</a>';
-            renderContent(`Request #${request.id}`, detailsHtml);
-
-            // Add event listeners
-            const assignForm = document.getElementById('assignVehicleForm');
-            if (assignForm) {
-                assignForm.addEventListener('submit', async (e) => {
-                    e.preventDefault();
-                    const carId = document.getElementById('carId').value;
-                    const driverId = document.getElementById('driverId').value;
-                    try {
-                        await api.assignCarToRequest(requestId, carId, driverId);
-                        alert('Vehicle assigned successfully!');
-                        handleRoute(); // Refresh page
-                    } catch (error) {
-                        alert(`Failed to assign vehicle: ${error.message}`);
-                    }
-                });
-            }
-
-            const startTripBtn = document.getElementById('startTripBtn');
-            if (startTripBtn) {
-                startTripBtn.addEventListener('click', async () => {
-                    try {
-                        await api.startTrip(requestId);
-                        alert('Trip started successfully!');
-                        handleRoute(); // Refresh
-                    } catch (error) {
-                        alert(`Failed to start trip: ${error.message}`);
-                    }
-                });
-            }
-
-            const completeTripForm = document.getElementById('completeTripForm');
-            if (completeTripForm) {
-                completeTripForm.addEventListener('submit', async (e) => {
-                    e.preventDefault();
-                    const totalDistance = document.getElementById('totalDistance').value;
-                    const tripNotes = document.getElementById('tripNotes').value;
-                    try {
-                        await api.completeTrip(requestId, parseFloat(totalDistance), tripNotes);
-                        alert('Trip completed successfully!');
-                        handleRoute(); // Refresh
-                    } catch (error) {
-                        alert(`Failed to complete trip: ${error.message}`);
-                    }
-                });
-            }
-
-        } catch (error) {
-            renderContent('Error', `<p class="text-danger">Failed to load request details: ${error.message}</p>`);
-        }
-    },
-    '/manage-requests.html': async () => {
-        renderContent('Manage All Requests', '<p>Loading requests...</p>');
-        try {
-            const requests = await api.getAllRequests();
-            let requestsHtml = '<div class="table-responsive"><table class="table table-striped table-sm"><thead><tr><th>Requester</th><th>Destination</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
-            if (requests.length === 0) {
-                requestsHtml += '<tr><td colspan="4">No requests found.</td></tr>';
-            } else {
-                requests.forEach(req => {
-                    requestsHtml += `<tr>
-                        <td>${req.user.firstName} ${req.user.lastName}</td>
-                        <td>${req.destination}</td>
-                        <td><span class="badge bg-info">${req.status}</span></td>
-                        <td>
-                            <button class="btn btn-sm btn-success approve-btn" data-request-id="${req.id}" ${req.status !== 'PENDING' ? 'disabled' : ''}>Approve</button>
-                            <button class="btn btn-sm btn-warning reject-btn" data-request-id="${req.id}" ${req.status !== 'PENDING' ? 'disabled' : ''}>Reject</button>
-                            <button class="btn btn-sm btn-primary view-details-btn" data-request-id="${req.id}">Details</button>
-                        </td>
-                    </tr>`;
-                });
-            }
-            requestsHtml += '</tbody></table></div>';
-            renderContent('Manage All Requests', requestsHtml);
-            addManagementActionListeners();
-        } catch (error) {
-            renderContent('Manage All Requests', `<p class="text-danger">Failed to load requests: ${error.message}</p>`);
-        }
-    },
-    '/statistics.html': async () => {
-        renderContent('Statistics', '<p>Loading statistics...</p>');
-        try {
-            const stats = await api.getRequestStats();
-            const statsHtml = `
-                <div class="row">
-                    <div class="col-md-4"><div class="card text-center"><div class="card-body"><h5>Total Requests</h5><p class="fs-2">${stats.total}</p></div></div></div>
-                    <div class="col-md-4"><div class="card text-center"><div class="card-body"><h5>Pending</h5><p class="fs-2">${stats.pending}</p></div></div></div>
-                    <div class="col-md-4"><div class="card text-center"><div class="card-body"><h5>Approved</h5><p class="fs-2">${stats.approved}</p></div></div></div>
-                    <div class="col-md-4 mt-3"><div class="card text-center"><div class="card-body"><h5>Completed</h5><p class="fs-2">${stats.completed}</p></div></div></div>
-                    <div class="col-md-4 mt-3"><div class="card text-center"><div class="card-body"><h5>Cancelled</h5><p class="fs-2">${stats.cancelled}</p></div></div></div>
-                    <div class="col-md-4 mt-3"><div class="card text-center"><div class="card-body"><h5>Rejected</h5><p class="fs-2">${stats.rejected}</p></div></div></div>
-                </div>
-            `;
-            renderContent('Request Statistics', statsHtml);
-        } catch (error) {
-            renderContent('Statistics', `<p class="text-danger">Failed to load statistics: ${error.message}</p>`);
-        }
-    },
-    '/overdue-requests.html': async () => {
-        renderContent('Overdue Requests', '<p>Loading overdue requests...</p>');
-        try {
-            const requests = await api.getOverdueRequests();
-            let requestsHtml = '<div class="table-responsive"><table class="table table-striped table-sm"><thead><tr><th>Requester</th><th>Destination</th><th>Return Date</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
-            if (requests.length === 0) {
-                requestsHtml += '<tr><td colspan="5">No overdue requests found.</td></tr>';
-            } else {
-                requests.forEach(req => {
-                    requestsHtml += `<tr>
-                        <td>${req.user.firstName} ${req.user.lastName}</td>
-                        <td>${req.destination}</td>
-                        <td>${new Date(req.returnDateTime).toLocaleString()}</td>
-                        <td><span class="badge bg-danger">${req.status}</span></td>
-                        <td>
-                            <button class="btn btn-sm btn-primary view-details-btn" data-request-id="${req.id}">Details</button>
-                        </td>
-                    </tr>`;
-                });
-            }
-            requestsHtml += '</tbody></table></div>';
-            renderContent('Overdue Requests', requestsHtml);
-            addRequestActionListeners(); // For the details button
-        } catch (error) {
-            renderContent('Overdue Requests', `<p class="text-danger">Failed to load overdue requests: ${error.message}</p>`);
-        }
-    },
-    '/user-management.html': async () => {
-        renderContent('User Management', '<p>Loading users...</p>');
-        try {
-            const users = await api.getUsers();
-            let usersHtml = `
-                <button class="btn btn-primary mb-3" id="create-user-btn">Create User</button>
-                <div class="table-responsive">
-                    <table class="table table-striped table-sm"><thead><tr>
-                        <th>Name</th><th>Email</th><th>Role</th><th>Department</th><th>Status</th><th>Actions</th>
-                    </tr></thead><tbody>
-            `;
-            if (users.length === 0) {
-                usersHtml += '<tr><td colspan="6">No users found.</td></tr>';
-            } else {
-                users.forEach(user => {
-                    usersHtml += `<tr>
-                        <td>${user.firstName} ${user.lastName}</td>
-                        <td>${user.email}</td>
-                        <td>${user.role}</td>
-                        <td>${user.department?.name || 'N/A'}</td>
-                        <td><span class="badge bg-success">${user.status}</span></td>
-                        <td>
-                            <button class="btn btn-sm btn-info edit-user-btn" data-user-id="${user.id}">Edit</button>
-                            <button class="btn btn-sm btn-danger delete-user-btn" data-user-id="${user.id}">Delete</button>
-                        </td>
-                    </tr>`;
-                });
-            }
-            usersHtml += '</tbody></table></div>';
-            renderContent('User Management', usersHtml);
-            addUserManagementListeners();
-        } catch (error) {
-            renderContent('User Management', `<p class="text-danger">Failed to load users: ${error.message}</p>`);
-        }
-    },
-    '/pending-approvals.html': async () => {
-        renderContent('Pending Approvals', '<p>Loading requests...</p>');
-        try {
-            const requests = await api.getPendingApprovals();
-            let requestsHtml = '<div class="table-responsive"><table class="table table-striped table-sm"><thead><tr><th>Requester</th><th>Destination</th><th>Actions</th></tr></thead><tbody>';
-            if (requests.length === 0) {
-                requestsHtml += '<tr><td colspan="3">No pending approvals.</td></tr>';
-            } else {
-                requests.forEach(req => {
-                    requestsHtml += `<tr>
-                        <td>${req.user.firstName} ${req.user.lastName}</td>
-                        <td>${req.destination}</td>
-                        <td>
-                            <button class="btn btn-sm btn-success approve-btn" data-request-id="${req.id}">Approve</button>
-                            <button class="btn btn-sm btn-warning reject-btn" data-request-id="${req.id}">Reject</button>
-                            <button class="btn btn-sm btn-primary view-details-btn" data-request-id="${req.id}">Details</button>
-                        </td>
-                    </tr>`;
-                });
-            }
-            requestsHtml += '</tbody></table></div>';
-            renderContent('Pending Approvals', requestsHtml);
-            addManagementActionListeners();
-        } catch (error) {
-            renderContent('Pending Approvals', `<p class="text-danger">Failed to load pending approvals: ${error.message}</p>`);
-        }
-    },
-};
-
-// --- User Management Helpers ---
-function renderUserForm(user = {}) {
-    const modalContainer = document.getElementById('form-modal-container');
-    const isEdit = !!user.id;
-    const title = isEdit ? 'Edit User' : 'Create User';
-
-    const formHtml = `
-    <div class="modal fade" id="userFormModal" tabindex="-1" aria-labelledby="userFormModalLabel" aria-hidden="true">
-      <div class="modal-dialog">
-        <div class="modal-content">
-          <div class="modal-header">
-            <h5 class="modal-title" id="userFormModalLabel">${title}</h5>
-            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-          </div>
-          <div class="modal-body">
-            <form id="userForm">
-              <input type="hidden" id="userId" value="${user.id || ''}">
-              <div class="mb-3">
-                <label for="firstName" class="form-label">First Name</label>
-                <input type="text" class="form-control" id="firstName" value="${user.firstName || ''}" required>
-              </div>
-              <div class="mb-3">
-                <label for="lastName" class="form-label">Last Name</label>
-                <input type="text" class="form-control" id="lastName" value="${user.lastName || ''}" required>
-              </div>
-              <div class="mb-3">
-                <label for="email" class="form-label">Email</label>
-                <input type="email" class="form-control" id="email" value="${user.email || ''}" required>
-              </div>
-              <div class="mb-3">
-                <label for="password" class="form-label">Password</label>
-                <input type="password" class="form-control" id="password" ${isEdit ? '' : 'required'}>
-                ${isEdit ? '<small class="form-text text-muted">Leave blank to keep current password.</small>' : ''}
-              </div>
-              <div class="mb-3">
-                <label for="role" class="form-label">Role</label>
-                <select class="form-select" id="role" required>
-                  <option value="USER" ${user.role === 'USER' ? 'selected' : ''}>User</option>
-                  <option value="APPROVER" ${user.role === 'APPROVER' ? 'selected' : ''}>Approver</option>
-                  <option value="AUTHORITY" ${user.role === 'AUTHORITY' ? 'selected' : ''}>Authority</option>
-                  <option value="ADMIN" ${user.role === 'ADMIN' ? 'selected' : ''}>Admin</option>
-                </select>
-              </div>
-               <div class="mb-3">
-                <label for="department" class="form-label">Department</label>
-                <input type="text" class="form-control" id="department" value="${user.department || ''}">
-              </div>
-               <div class="mb-3">
-                <label for="position" class="form-label">Position</label>
-                <input type="text" class="form-control" id="position" value="${user.position || ''}">
-              </div>
-              <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                <button type="submit" class="btn btn-primary">Save changes</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      </div>
-    </div>
-    `;
-    modalContainer.innerHTML = formHtml;
-
-    const userForm = document.getElementById('userForm');
-    userForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const userId = document.getElementById('userId').value;
-        const userData = {
-            firstName: document.getElementById('firstName').value,
-            lastName: document.getElementById('lastName').value,
-            email: document.getElementById('email').value,
-            role: document.getElementById('role').value,
-            department: document.getElementById('department').value,
-            position: document.getElementById('position').value,
-        };
-        const password = document.getElementById('password').value;
-        if (password) {
-            userData.password = password;
-        }
-
-        try {
-            if (userId) {
-                await api.updateUser(userId, userData);
-                alert('User updated successfully!');
-            } else {
-                await api.createUser(userData);
-                alert('User created successfully!');
-            }
-            const modalEl = document.getElementById('userFormModal');
-            const modal = bootstrap.Modal.getInstance(modalEl);
-            modal.hide();
-            modalEl.addEventListener('hidden.bs.modal', () => handleRoute(), { once: true });
-        } catch (error) {
-            alert(`Error: ${error.message}`);
-        }
-    });
-}
-
-function addUserManagementListeners() {
-    document.getElementById('create-user-btn')?.addEventListener('click', () => {
-        renderUserForm();
-        const modal = new bootstrap.Modal(document.getElementById('userFormModal'));
-        modal.show();
-    });
-
-    document.querySelectorAll('.edit-user-btn').forEach(button => {
-        button.addEventListener('click', async (e) => {
-            const userId = e.currentTarget.dataset.userId;
-            try {
-                const user = await api.getUserById(userId);
-                renderUserForm(user);
-                const modal = new bootstrap.Modal(document.getElementById('userFormModal'));
-                modal.show();
-            } catch (error) {
-                alert(`Failed to fetch user details: ${error.message}`);
-            }
-        });
-    });
-
-    document.querySelectorAll('.delete-user-btn').forEach(button => {
-        button.addEventListener('click', async (e) => {
-            const userId = e.currentTarget.dataset.userId;
-            if (confirm('Are you sure you want to delete this user?')) {
-                try {
-                    await api.deleteUser(userId);
-                    alert('User deleted successfully.');
-                    handleRoute(); // Refresh list
-                } catch (error) {
-                    alert(`Failed to delete user: ${error.message}`);
-                }
-            }
-        });
-    });
-}
-
-// --- Authentication and Routing --- //
-const protectedRoutes = {
-    'dashboard.html': ['ADMIN', 'AUTHORITY', 'USER', 'APPROVER'],
-    'my-requests.html': ['USER', 'ADMIN', 'AUTHORITY', 'APPROVER'],
-    'request-form.html': ['USER', 'ADMIN', 'AUTHORITY', 'APPROVER'],
-    'user-management.html': ['ADMIN'],
-    'statistics.html': ['ADMIN', 'AUTHORITY'],
-    'overdue-requests.html': ['ADMIN', 'AUTHORITY'],
-    'manage-requests.html': ['ADMIN', 'AUTHORITY'],
-    'request-details.html': ['ADMIN', 'AUTHORITY', 'USER', 'APPROVER']
-};
-
-// Public routes - accessible without authentication
-const publicRoutes = ['login.html', 'index.html', ''];
-
-// Static assets that don't need authentication
-const staticAssets = ['styles.css', 'js/app.js', 'favicon.ico'];
-
-function checkAuth() {
-    if (!api.isAuthenticated()) {
-        window.location.href = '/login.html';
-        return false;
-    }
-    return true;
-}
-
-function handleRoute() {
-    const path = window.location.pathname.split('/').pop() || 'index.html';
-    const page = pages[path];
-    
-    // Check if route is protected
-    if (protectedRoutes[path]) {
-        if (!checkAuth()) return; // Redirects to login if not authenticated
-        
-        // Check if user has required role
-        const user = api.getCurrentUser();
-        if (!user || !protectedRoutes[path].includes(user.role)) {
-            // Redirect to dashboard if user doesn't have required role
-            window.location.href = '/dashboard.html';
-            return;
-        }
-    }
-    
-    if (page) {
-        page();
-    } else if (!publicRoutes.includes(path)) {
-        // If page not found and not a public route, redirect to dashboard
-        window.location.href = '/dashboard.html';
-    }
-}
-
-// --- App Initialization --- //
-async function initProtectedPage() {
-    console.group('=== initProtectedPage ===');
-    
-    // Check if we have a token
-    const token = localStorage.getItem('authToken');
-    console.log('1. Token exists:', !!token);
-    
-    if (!token) {
-        console.log('No auth token found, logging out');
-        api.logout();
-        console.groupEnd();
-        return;
-    }
-    
-    try {
-        console.log('2. Fetching current user data...');
-        const user = await api.getCurrentUser();
-        
-        if (!user || !user.id) {
-            throw new Error('Invalid user data received');
-        }
-        
-        console.log('3. User data loaded:', { id: user.id, email: user.email, role: user.role });
-        
-        // Update state and localStorage
-        state.currentUser = user;
-        localStorage.setItem('userData', JSON.stringify(user));
-        
-        console.log('4. Rendering app layout...');
-        renderAppLayout();
-        
-        console.log('5. Handling route...');
-        handleRoute();
-        
-        console.log('6. Page initialization complete');
-        console.groupEnd();
-        
-    } catch (error) {
-        console.error('Initialization failed:', error);
-        console.error('Error details:', {
-            message: error.message,
-            stack: error.stack
-        });
-        
-        // Clear any potentially corrupted auth data
-        localStorage.removeItem('authToken');
-        localStorage.removeItem('userData');
-        
-        console.log('Redirecting to login due to initialization error');
-        console.groupEnd();
-        
-        // Redirect to login with an error message
-        window.location.href = '/login.html?error=session_expired';
-    }
-}
-
-// Check if current path is a static asset
-function isStaticAsset(path) {
-    return staticAssets.some(asset => path.endsWith(asset));
-}
-
-// Main application initialization
-async function initializeApp() {
-    console.log('--- initializeApp started ---');
+// --- Page Management --- //
+function getCurrentPage() {
     const path = window.location.pathname;
-    const currentPath = path.split('/').pop() || 'index.html';
-    
-    console.log('Current URL:', window.location.href);
-    console.log('Current path:', path, 'Extracted path:', currentPath);
-    
-    // Skip authentication check for static assets
-    if (isStaticAsset(currentPath)) {
-        console.log('Skipping authentication for static asset:', currentPath);
-        return;
-    }
-
-    const isLoggedIn = api.isAuthenticated();
-    console.log('Is user authenticated?', isLoggedIn);
-    console.log('Auth token exists:', !!localStorage.getItem('authToken'));
-    console.log('User data exists:', !!localStorage.getItem('userData'));
-    
-    if (isLoggedIn) {
-        console.log('Current user data from localStorage:', localStorage.getItem('userData'));
-        console.log('Current user data from api:', api.getCurrentUser());
-    }
-
-    const loginForm = document.getElementById('loginForm');
-    console.log('Login form found:', !!loginForm);
-
-    // Handle login page
-    if (currentPath === 'login.html' || currentPath === 'index.html') {
-        console.log('On login page');
-        
-        if (isLoggedIn) {
-            const user = api.getCurrentUser();
-            console.log('User is already logged in, redirecting based on role:', user?.role);
-            
-            // Redirect based on role
-            let redirectPath = '/dashboard.html';
-            if (user?.role === 'USER') {
-                redirectPath = '/my-requests.html';
-            } else if (user?.role === 'APPROVER') {
-                redirectPath = '/approvals.html';
-            }
-            
-            console.log('Redirecting to:', redirectPath);
-            window.location.replace(redirectPath);
-            return;
-        }
-        
-        // Initialize login form if it exists
-        if (loginForm) {
-            console.log('Initializing login form');
-            loginForm.addEventListener('submit', handleLogin);
-        } else {
-            console.warn('Login form not found on login page');
-        }
-        return;
-    }
-
-    console.log('Checking protected route:', currentPath);
-    
-    // Handle protected routes
-    if (!isLoggedIn) {
-        console.log('User not logged in, redirecting to login');
-        // If not logged in, redirect to login
-        window.location.replace('/login.html');
-        return;
-    }
-
-    // If we got here, user is authenticated, initialize the protected page
-    try {
-        console.log('Initializing protected page:', currentPath);
-        initProtectedPage();
-    } catch (error) {
-        console.error('Error initializing protected page:', error);
-        // If there's an error, log out and redirect to login
-        console.error('Logging out due to error');
-        api.logout();
-        window.location.replace('/login.html');
-    }
+    const page = path.split('/').pop() || 'index.html';
+    return page.replace('.html', '');
 }
 
-// Handle login form submission
-async function handleLogin(e) {
-    e.preventDefault();
-    console.group('=== Login Process ===');
-    console.log('Login form submitted');
+function updateNavigation() {
+    const currentPage = getCurrentPage();
+    const user = api.getCurrentUser();
     
-    const errorMessage = document.getElementById('errorMessage');
-    const loginForm = e.target;
-    const submitButton = loginForm.querySelector('button[type="submit"]');
+    if (!user) return;
     
-    errorMessage.textContent = '';
-    errorMessage.className = 'error-message';
-    submitButton.disabled = true;
-    submitButton.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Signing in...';
+    // Update user info in header
+    const userWelcome = document.getElementById('userWelcome');
+    const userAvatar = document.getElementById('userAvatar');
     
-    const credentials = {
-        email: loginForm.email.value,
-        password: loginForm.password.value
+    if (userWelcome) {
+        userWelcome.textContent = `Welcome, ${user.firstName || user.email}`;
+    }
+    
+    if (userAvatar) {
+        const initials = user.firstName ? 
+            (user.firstName.charAt(0) + (user.lastName?.charAt(0) || '')).toUpperCase() :
+            user.email.charAt(0).toUpperCase();
+        userAvatar.textContent = initials;
+    }
+    
+    // Show/hide navigation items based on role
+    const roleBasedNavItems = {
+        'approvalsNav': ['APPROVER', 'ADMIN', 'AUTHORITY'],
+        'manageRequestsNav': ['ADMIN', 'AUTHORITY'],
+        'fleetManagementNav': ['ADMIN', 'AUTHORITY'],
+        'userManagementNav': ['ADMIN'],
+        'reportsNav': ['ADMIN', 'AUTHORITY']
     };
     
-    console.log('Attempting login with credentials (email only shown for debugging):', { email: credentials.email });
+    Object.entries(roleBasedNavItems).forEach(([navId, allowedRoles]) => {
+        const navElement = document.getElementById(navId);
+        if (navElement) {
+            navElement.style.display = allowedRoles.includes(user.role) ? 'block' : 'none';
+        }
+    });
     
-    try {
-        console.log('1. Calling api.login()');
-        const user = await api.login(credentials);
-        
-        if (!user) {
-            throw new Error('No user data returned from login');
+    // Update active navigation
+    document.querySelectorAll('.nav-link').forEach(link => {
+        link.classList.remove('active');
+        const linkPage = link.getAttribute('data-page');
+        if (linkPage === currentPage || 
+            (currentPage === 'index' && linkPage === 'dashboard')) {
+            link.classList.add('active');
         }
-        
-        console.log('2. Login successful, user data received:', {
-            id: user.id,
-            email: user.email,
-            role: user.role,
-            name: user.firstName ? `${user.firstName} ${user.lastName || ''}`.trim() : 'Unknown'
+    });
+}
+
+function setupEventListeners() {
+    // Logout button
+    const logoutBtn = document.getElementById('logoutBtn');
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', () => {
+            api.logout();
         });
+    }
+    
+    // Navigation links
+    document.querySelectorAll('.nav-link').forEach(link => {
+        link.addEventListener('click', (e) => {
+            const href = link.getAttribute('href');
+            if (href && href.startsWith('/')) {
+                e.preventDefault();
+                window.location.href = href;
+            }
+        });
+    });
+}
+
+// --- Page Initialization Functions --- //
+async function initDashboard() {
+    try {
+        // Load dashboard stats
+        const [requestStats, userStats, carStats] = await Promise.all([
+            api.getRequestStats().catch(() => ({})),
+            api.getUserStats().catch(() => ({})),
+            api.getCarStats().catch(() => ({}))
+        ]);
         
-        // Verify the token was properly set
-        const token = localStorage.getItem('authToken');
-        if (!token) {
-            throw new Error('Authentication token was not set properly');
-        }
+        // Update stats cards
+        updateStatsCard('totalRequests', requestStats.total || 0);
+        updateStatsCard('pendingRequests', requestStats.pending || 0);
+        updateStatsCard('approvedRequests', requestStats.approved || 0);
+        updateStatsCard('activeTrips', requestStats.active || 0);
         
-        console.log('3. Auth token verified in localStorage');
+        // Load recent activity
+        loadRecentActivity();
         
-        // Store the current user in the app state and localStorage
-        state.currentUser = user;
-        localStorage.setItem('userData', JSON.stringify(user));
-        
-        console.log('4. User data stored in state and localStorage');
-        
-        // Determine the redirect URL based on user role
-        let redirectUrl = '/dashboard.html';
-        if (user.role === 'USER') {
-            redirectUrl = '/my-requests.html';
-        } else if (user.role === 'APPROVER') {
-            redirectUrl = '/approvals.html';
-        }
-        
-        console.log('5. Preparing to redirect to:', redirectUrl);
-        
-        // Add a small delay to ensure all state is saved
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-        console.log('6. Performing hard redirect');
-        console.groupEnd();
-        
-        // Force a hard redirect to ensure the page loads fresh
-        window.location.href = redirectUrl;
+        // Setup quick actions
+        setupQuickActions();
         
     } catch (error) {
-        console.error('Login failed:', error);
+        console.error('Error initializing dashboard:', error);
+        showAlert('Error loading dashboard data', 'danger');
+    }
+}
+
+async function initUserManagement() {
+    try {
+        // Load user stats
+        const userStats = await api.getUserStats().catch(() => ({}));
+        updateStatsCard('totalUsers', userStats.total || 0);
+        updateStatsCard('activeUsers', userStats.active || 0);
+        updateStatsCard('adminUsers', userStats.admins || 0);
+        updateStatsCard('pendingUsers', userStats.pending || 0);
         
-        // Show user-friendly error message
-        let errorMsg = 'Login failed. Please try again.';
+        // Load users table
+        await loadUsersTable();
         
-        if (error.message.includes('401') || error.message.includes('credentials') || error.message.includes('invalid')) {
-            errorMsg = 'Invalid email or password. Please try again.';
-        } else if (error.message.includes('network')) {
-            errorMsg = 'Network error. Please check your connection and try again.';
-        } else if (error.message) {
-            errorMsg = error.message;
+        // Setup user management event listeners
+        setupUserManagementEvents();
+        
+    } catch (error) {
+        console.error('Error initializing user management:', error);
+        showAlert('Error loading user management data', 'danger');
+    }
+}
+
+async function initFleetManagement() {
+    try {
+        // Load fleet stats
+        const carStats = await api.getCarStats().catch(() => ({}));
+        updateStatsCard('totalVehicles', carStats.total || 0);
+        updateStatsCard('availableVehicles', carStats.available || 0);
+        updateStatsCard('inUseVehicles', carStats.inUse || 0);
+        updateStatsCard('maintenanceVehicles', carStats.maintenance || 0);
+        
+        // Load vehicles table
+        await loadVehiclesTable();
+        
+        // Setup fleet management event listeners
+        setupFleetManagementEvents();
+        
+    } catch (error) {
+        console.error('Error initializing fleet management:', error);
+        showAlert('Error loading fleet management data', 'danger');
+    }
+}
+
+async function initMyRequests() {
+    try {
+        // Load my requests
+        const requests = await api.getMyRequests();
+        
+        // Update stats
+        const stats = calculateRequestStats(requests);
+        updateStatsCard('totalMyRequests', stats.total);
+        updateStatsCard('pendingMyRequests', stats.pending);
+        updateStatsCard('approvedMyRequests', stats.approved);
+        updateStatsCard('completedMyRequests', stats.completed);
+        
+        // Load requests table
+        loadMyRequestsTable(requests);
+        
+        // Setup event listeners
+        setupMyRequestsEvents();
+        
+    } catch (error) {
+        console.error('Error initializing my requests:', error);
+        showAlert('Error loading your requests', 'danger');
+    }
+}
+
+async function initApprovals() {
+    try {
+        // Load pending approvals
+        const approvals = await api.getPendingApprovals();
+        
+        // Update stats
+        updateStatsCard('totalPendingApprovals', approvals.length);
+        updateStatsCard('approvedToday', 0); // This would need additional API endpoint
+        updateStatsCard('rejectedToday', 0); // This would need additional API endpoint
+        updateStatsCard('urgentApprovals', approvals.filter(r => r.priority === 'urgent').length);
+        
+        // Load approvals table
+        loadApprovalsTable(approvals);
+        
+        // Setup event listeners
+        setupApprovalsEvents();
+        
+    } catch (error) {
+        console.error('Error initializing approvals:', error);
+        showAlert('Error loading pending approvals', 'danger');
+    }
+}
+
+// --- Utility Functions for Page Initialization --- //
+function updateStatsCard(elementId, value) {
+    const element = document.getElementById(elementId);
+    if (element) {
+        element.textContent = value;
+    }
+}
+
+function calculateRequestStats(requests) {
+    return {
+        total: requests.length,
+        pending: requests.filter(r => r.status === 'pending').length,
+        approved: requests.filter(r => r.status === 'approved').length,
+        completed: requests.filter(r => r.status === 'completed').length
+    };
+}
+
+async function loadRecentActivity() {
+    const container = document.getElementById('recentActivity');
+    if (!container) return;
+    
+    try {
+        const requests = await api.getMyRequests();
+        const recentRequests = requests.slice(0, 5);
+        
+        if (recentRequests.length === 0) {
+            container.innerHTML = '<p class="text-muted text-center">No recent activity</p>';
+            return;
         }
         
-        errorMessage.textContent = errorMsg;
+        const activityHtml = recentRequests.map(request => `
+            <div class="d-flex justify-between align-center py-2 border-bottom">
+                <div>
+                    <strong>${request.purpose}</strong><br>
+                    <small class="text-muted">${formatDate(request.createdAt)}</small>
+                </div>
+                <div>${getStatusBadge(request.status)}</div>
+            </div>
+        `).join('');
         
-        // Clear the password field for security
-        loginForm.password.value = '';
+        container.innerHTML = activityHtml;
         
-    } finally {
-        console.log('Resetting login button state');
+    } catch (error) {
+        container.innerHTML = '<p class="text-danger text-center">Error loading recent activity</p>';
+    }
+}
+
+function setupQuickActions() {
+    const quickNewRequest = document.getElementById('quickNewRequest');
+    const quickViewRequests = document.getElementById('quickViewRequests');
+    const quickViewFleet = document.getElementById('quickViewFleet');
+    
+    if (quickNewRequest) {
+        quickNewRequest.addEventListener('click', () => { window.location.href = '/new-request.html'; });
+    }
+    if (quickViewRequests) {
+        quickViewRequests.addEventListener('click', () => { window.location.href = '/my-requests.html'; });
+    }
+    if (quickViewFleet) {
+        quickViewFleet.addEventListener('click', () => { window.location.href = '/fleet-management.html'; });
+    }
+}
+
+// --- Initialization Helpers ---
+function getRedirectPathForRole(role) {
+    switch (role) {
+        case 'ADMIN':
+        case 'AUTHORITY':
+            return '/dashboard.html';
+        case 'APPROVER':
+            return '/approvals.html';
+        case 'USER':
+        default:
+            return '/my-requests.html';
+    }
+}
+
+async function initProtectedPage(currentPage) {
+    // This function assumes the user is already authenticated and their data is loaded.
+    try {
+        updateNavigation();
+        setupEventListeners();
+
+        // Call the specific initialization function for the current page
+        switch (currentPage) {
+            case 'dashboard': await initDashboard(); break;
+            case 'user-management': await initUserManagement(); break;
+            case 'fleet-management': await initFleetManagement(); break;
+            case 'my-requests': await initMyRequests(); break;
+            case 'approvals': await initApprovals(); break;
+            case 'manage-requests': await initManageRequests(); break;
+            case 'reports': await initReports(); break;
+            // No default case needed, non-matching pages will just have nav/events setup.
+        }
+    } catch (error) {
+        console.error(`Failed to initialize content for page ${currentPage}:`, error);
+        showAlert('There was an error loading page content.', 'danger');
+    }
+}
+
+// --- Main Application Initialization --- //
+async function initializeApp() {
+    const currentPage = getCurrentPage();
+    const token = api.token;
+
+    if (token) {
+        // A token exists. Validate it by fetching user data.
+        try {
+            const user = await api.getMe();
+            state.currentUser = user;
+            localStorage.setItem(USER_KEY, JSON.stringify(user)); // Refresh user data
+
+            // User is authenticated. Check where they are.
+            if (currentPage === 'login' || currentPage === 'index') {
+                // Redirect logged-in users away from the login page.
+                window.location.replace(getRedirectPathForRole(user.role));
+                return;
+            }
+            
+            // Initialize the protected page they're on.
+            await initProtectedPage(currentPage);
+
+        } catch (error) {
+            // Token is invalid or expired. Force logout.
+            console.error('Authentication check failed, forcing logout.', error);
+            api.logout(); // This clears tokens and redirects to login.
+        }
+    } else {
+        // No token. User is not logged in.
+        if (currentPage !== 'login' && currentPage !== 'index') {
+            // If on a protected page, redirect to login.
+            window.location.replace('/login.html');
+            return;
+        }
+        // Otherwise, we're on the login page. Set up the form.
+        const loginForm = document.getElementById('loginForm');
+        if (loginForm) {
+            loginForm.addEventListener('submit', handleLogin);
+        }
+    }
+}
+
+// --- Login Page Handling --- //
+async function handleLogin(e) {
+    e.preventDefault();
+    const form = e.target;
+    const submitButton = form.querySelector('button[type="submit"]');
+    const errorMessage = document.getElementById('errorMessage');
+
+    errorMessage.textContent = '';
+    submitButton.disabled = true;
+    submitButton.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Signing In...';
+
+    try {
+        const user = await api.login({ email: form.email.value, password: form.password.value });
+        window.location.replace(getRedirectPathForRole(user.role));
+    } catch (error) {
+        console.error('Login failed:', error);
+        errorMessage.textContent = error.message || 'An unknown error occurred.';
         submitButton.disabled = false;
         submitButton.textContent = 'Sign In';
     }
 }
 
-// Initialize the application when DOM is loaded
+// --- Initialize Application on DOM Load --- //
 document.addEventListener('DOMContentLoaded', initializeApp);
 
-// Handle browser back/forward buttons
-window.addEventListener('popstate', initializeApp);
+// Placeholder functions for pages not yet implemented
+async function initManageRequests() {
+    console.log('Manage requests page initialization - placeholder');
+}
+
+async function initReports() {
+    console.log('Reports page initialization - placeholder');
+}
+
+function setupUserManagementEvents() {
+    console.log('User management events setup - placeholder');
+}
+
+function setupFleetManagementEvents() {
+    console.log('Fleet management events setup - placeholder');
+}
+
+function setupMyRequestsEvents() {
+    console.log('My requests events setup - placeholder');
+}
+
+function setupApprovalsEvents() {
+    console.log('Approvals events setup - placeholder');
+}
+
+async function loadUsersTable() {
+    console.log('Load users table - placeholder');
+}
+
+async function loadVehiclesTable() {
+    console.log('Load vehicles table - placeholder');
+}
+
+function loadMyRequestsTable(requests) {
+    console.log('Load my requests table - placeholder', requests);
+}
+
+function loadApprovalsTable(approvals) {
+    console.log('Load approvals table - placeholder', approvals);
+}

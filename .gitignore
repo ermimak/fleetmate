@@ -3,3 +3,5 @@
 /dist
 /webapp/node_modules
 /webapp/dist
+/frontend/node_modules
+/frontend/dist

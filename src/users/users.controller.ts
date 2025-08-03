@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Query } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Query, Request } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 
 import { UsersService } from './users.service';
@@ -45,6 +45,25 @@ export class UsersController {
   @Roles(UserRole.ADMIN)
   getStats() {
     return this.usersService.getUserStats();
+  }
+
+  @Get('me')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.AUTHORITY, UserRole.USER, UserRole.APPROVER)
+  async getMe(@Request() req) {
+    try {
+      // The user object is attached to the request by the AuthGuard
+      const user = await this.usersService.findOne(req.user.userId);
+      if (!user) {
+        throw new Error('User not found');
+      }
+      // Remove sensitive data before returning
+      const { password, ...result } = user;
+      return result;
+    } catch (error) {
+      console.error('Error in getMe:', error);
+      throw error;
+    }
   }
 
   @Get(':id')

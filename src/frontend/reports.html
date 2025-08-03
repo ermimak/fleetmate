@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reports - FleetMate</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles/main.css">
+</head>
+<body>
+    <div class="main-layout">
+        <!-- Header -->
+        <header class="header">
+            <div class="container">
+                <div class="header-content">
+                    <a href="/dashboard.html" class="logo">FleetMate</a>
+                    <div class="user-menu">
+                        <span id="userWelcome" class="text-muted">Welcome, User</span>
+                        <div class="user-avatar" id="userAvatar">U</div>
+                        <button class="btn btn-outline btn-sm" id="logoutBtn">Logout</button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <div class="container">
+            <div class="content-wrapper">
+                <!-- Sidebar -->
+                <aside class="sidebar">
+                    <nav>
+                        <ul class="nav-menu">
+                            <li class="nav-item">
+                                <a href="/dashboard.html" class="nav-link" data-page="dashboard">
+                                    <span class="nav-icon">📊</span>
+                                    Dashboard
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="/my-requests.html" class="nav-link" data-page="my-requests">
+                                    <span class="nav-icon">📋</span>
+                                    My Requests
+                                </a>
+                            </li>
+                            <li class="nav-item" id="newRequestNav">
+                                <a href="/new-request.html" class="nav-link" data-page="new-request">
+                                    <span class="nav-icon">➕</span>
+                                    New Request
+                                </a>
+                            </li>
+                            <li class="nav-item" id="approvalsNav" style="display: none;">
+                                <a href="/approvals.html" class="nav-link" data-page="approvals">
+                                    <span class="nav-icon">✅</span>
+                                    Approvals
+                                </a>
+                            </li>
+                            <li class="nav-item" id="manageRequestsNav" style="display: none;">
+                                <a href="/manage-requests.html" class="nav-link" data-page="manage-requests">
+                                    <span class="nav-icon">🗂️</span>
+                                    Manage Requests
+                                </a>
+                            </li>
+                            <li class="nav-item" id="fleetManagementNav" style="display: none;">
+                                <a href="/fleet-management.html" class="nav-link" data-page="fleet-management">
+                                    <span class="nav-icon">🚗</span>
+                                    Fleet Management
+                                </a>
+                            </li>
+                            <li class="nav-item" id="userManagementNav" style="display: none;">
+                                <a href="/user-management.html" class="nav-link" data-page="user-management">
+                                    <span class="nav-icon">👥</span>
+                                    User Management
+                                </a>
+                            </li>
+                            <li class="nav-item" id="reportsNav" style="display: none;">
+                                <a href="/reports.html" class="nav-link active" data-page="reports">
+                                    <span class="nav-icon">📈</span>
+                                    Reports
+                                </a>
+                            </li>
+                        </ul>
+                    </nav>
+                </aside>
+
+                <!-- Main Content -->
+                <main class="main-content">
+                    <div id="pageContent">
+                        <!-- Reports Content -->
+                        <div class="d-flex justify-between align-center mb-4">
+                            <h1 class="mb-0">Reports & Analytics</h1>
+                            <div class="d-flex gap-2">
+                                <button class="btn btn-outline btn-sm" id="exportAllBtn">
+                                    📊 Export All
+                                </button>
+                                <button class="btn btn-outline btn-sm" id="refreshReportsBtn">
+                                    <span class="loading d-none" id="refreshLoading"></span>
+                                    Refresh
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Report Filters -->
+                        <div class="card mb-4">
+                            <div class="card-header">
+                                <h3 class="mb-0">Report Filters</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="d-flex gap-3 align-center flex-wrap">
+                                    <div class="form-group mb-0">
+                                        <label class="form-label">Date Range</label>
+                                        <select class="form-control form-select" id="dateRangeFilter">
+                                            <option value="7">Last 7 days</option>
+                                            <option value="30" selected>Last 30 days</option>
+                                            <option value="90">Last 90 days</option>
+                                            <option value="365">Last year</option>
+                                            <option value="custom">Custom range</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group mb-0" id="customDateRange" style="display: none;">
+                                        <label class="form-label">From</label>
+                                        <input type="date" class="form-control" id="startDate">
+                                    </div>
+                                    <div class="form-group mb-0" id="customDateRangeTo" style="display: none;">
+                                        <label class="form-label">To</label>
+                                        <input type="date" class="form-control" id="endDate">
+                                    </div>
+                                    <div class="form-group mb-0">
+                                        <label class="form-label">Department</label>
+                                        <select class="form-control form-select" id="departmentFilter">
+                                            <option value="">All Departments</option>
+                                        </select>
+                                    </div>
+                                    <button class="btn btn-primary" id="applyFilters" style="margin-top: 1.5rem;">Apply Filters</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Key Metrics -->
+                        <div class="stats-grid mb-4">
+                            <div class="stat-card">
+                                <div class="stat-value" id="totalRequestsMetric">-</div>
+                                <div class="stat-label">Total Requests</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-value" id="completionRateMetric">-%</div>
+                                <div class="stat-label">Completion Rate</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-value" id="avgProcessingTimeMetric">- days</div>
+                                <div class="stat-label">Avg Processing Time</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-value" id="fleetUtilizationMetric">-%</div>
+                                <div class="stat-label">Fleet Utilization</div>
+                            </div>
+                        </div>
+
+                        <!-- Reports Grid -->
+                        <div class="d-flex gap-4 flex-wrap">
+                            <!-- Request Statistics -->
+                            <div class="card" style="flex: 1; min-width: 300px;">
+                                <div class="card-header d-flex justify-between align-center">
+                                    <h3 class="mb-0">Request Statistics</h3>
+                                    <button class="btn btn-outline btn-sm" id="exportRequestStats">Export</button>
+                                </div>
+                                <div class="card-body">
+                                    <div id="requestStatsChart">
+                                        <div class="text-center text-muted">
+                                            <div class="loading"></div>
+                                            Loading request statistics...
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Fleet Usage -->
+                            <div class="card" style="flex: 1; min-width: 300px;">
+                                <div class="card-header d-flex justify-between align-center">
+                                    <h3 class="mb-0">Fleet Usage</h3>
+                                    <button class="btn btn-outline btn-sm" id="exportFleetUsage">Export</button>
+                                </div>
+                                <div class="card-body">
+                                    <div id="fleetUsageChart">
+                                        <div class="text-center text-muted">
+                                            <div class="loading"></div>
+                                            Loading fleet usage data...
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Department Analysis -->
+                        <div class="card mb-4 mt-4">
+                            <div class="card-header d-flex justify-between align-center">
+                                <h3 class="mb-0">Department Analysis</h3>
+                                <button class="btn btn-outline btn-sm" id="exportDepartmentAnalysis">Export</button>
+                            </div>
+                            <div class="card-body">
+                                <div id="departmentAnalysisTable">
+                                    <div class="text-center text-muted">
+                                        <div class="loading"></div>
+                                        Loading department analysis...
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Top Performers -->
+                        <div class="d-flex gap-4 flex-wrap">
+                            <!-- Most Active Users -->
+                            <div class="card" style="flex: 1; min-width: 300px;">
+                                <div class="card-header">
+                                    <h3 class="mb-0">Most Active Users</h3>
+                                </div>
+                                <div class="card-body">
+                                    <div id="activeUsersList">
+                                        <div class="text-center text-muted">
+                                            <div class="loading"></div>
+                                            Loading active users...
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Most Used Vehicles -->
+                            <div class="card" style="flex: 1; min-width: 300px;">
+                                <div class="card-header">
+                                    <h3 class="mb-0">Most Used Vehicles</h3>
+                                </div>
+                                <div class="card-body">
+                                    <div id="usedVehiclesList">
+                                        <div class="text-center text-muted">
+                                            <div class="loading"></div>
+                                            Loading vehicle usage...
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Overdue Requests -->
+                        <div class="card mt-4">
+                            <div class="card-header d-flex justify-between align-center">
+                                <h3 class="mb-0">Overdue Requests</h3>
+                                <button class="btn btn-outline btn-sm" id="exportOverdueRequests">Export</button>
+                            </div>
+                            <div class="card-body">
+                                <div id="overdueRequestsTable">
+                                    <div class="text-center text-muted">
+                                        <div class="loading"></div>
+                                        Loading overdue requests...
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </main>
+            </div>
+        </div>
+    </div>
+
+    <!-- Export Options Modal -->
+    <div id="exportModal" class="modal-overlay d-none">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 class="modal-title">Export Options</h2>
+                <button class="modal-close" id="closeExportModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="exportForm">
+                    <div class="form-group">
+                        <label class="form-label">Export Format</label>
+                        <select class="form-control form-select" id="exportFormat" required>
+                            <option value="csv">CSV</option>
+                            <option value="excel">Excel</option>
+                            <option value="pdf">PDF</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Include</label>
+                        <div class="d-flex flex-column gap-2">
+                            <label class="d-flex align-center gap-2">
+                                <input type="checkbox" id="includeStats" checked>
+                                Statistics Summary
+                            </label>
+                            <label class="d-flex align-center gap-2">
+                                <input type="checkbox" id="includeCharts" checked>
+                                Charts and Graphs
+                            </label>
+                            <label class="d-flex align-center gap-2">
+                                <input type="checkbox" id="includeDetails" checked>
+                                Detailed Data
+                            </label>
+                        </div>
+                    </div>
+                    <div id="exportError" class="alert alert-danger d-none"></div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline" id="cancelExportBtn">Cancel</button>
+                <button type="submit" class="btn btn-primary" id="confirmExportBtn" form="exportForm">
+                    <span class="loading d-none" id="exportLoading"></span>
+                    Export Report
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="modal-overlay d-none">
+        <div class="card" style="padding: 2rem; text-align: center;">
+            <div class="loading" style="margin: 0 auto 1rem;"></div>
+            <div>Loading reports...</div>
+        </div>
+    </div>
+
+    <script src="js/app.js" type="module"></script>
+    <script>
+        // Initialize reports when DOM is loaded
+        document.addEventListener('DOMContentLoaded', function() {
+            // This will be handled by app.js
+        });
+    </script>
+</body>
+</html>

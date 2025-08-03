@@ -17,7 +17,7 @@ export class CreateUserDto {
   lastName: string;
 
   @IsNotEmpty()
-  departmentId: string;
+  department: string;
 
   @IsNotEmpty()
   position: string;

@@ -4,10 +4,169 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard - FleetMate</title>
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500&display=swap">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles/main.css">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</head>
+<body>
+    <div class="main-layout">
+        <!-- Header -->
+        <header class="header">
+            <div class="container">
+                <div class="header-content">
+                    <a href="/dashboard.html" class="logo">FleetMate</a>
+                    <div class="user-menu">
+                        <span id="userWelcome" class="text-muted">Welcome, User</span>
+                        <div class="user-avatar" id="userAvatar">U</div>
+                        <button class="btn btn-outline btn-sm" id="logoutBtn">Logout</button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <div class="container">
+            <div class="content-wrapper">
+                <!-- Sidebar -->
+                <aside class="sidebar">
+                    <nav>
+                        <ul class="nav-menu">
+                            <li class="nav-item">
+                                <a href="/dashboard.html" class="nav-link active" data-page="dashboard">
+                                    <span class="nav-icon">📊</span>
+                                    Dashboard
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="/my-requests.html" class="nav-link" data-page="my-requests">
+                                    <span class="nav-icon">📋</span>
+                                    My Requests
+                                </a>
+                            </li>
+                            <li class="nav-item" id="newRequestNav">
+                                <a href="/new-request.html" class="nav-link" data-page="new-request">
+                                    <span class="nav-icon">➕</span>
+                                    New Request
+                                </a>
+                            </li>
+                            <li class="nav-item" id="approvalsNav" style="display: none;">
+                                <a href="/approvals.html" class="nav-link" data-page="approvals">
+                                    <span class="nav-icon">✅</span>
+                                    Approvals
+                                </a>
+                            </li>
+                            <li class="nav-item" id="manageRequestsNav" style="display: none;">
+                                <a href="/manage-requests.html" class="nav-link" data-page="manage-requests">
+                                    <span class="nav-icon">🗂️</span>
+                                    Manage Requests
+                                </a>
+                            </li>
+                            <li class="nav-item" id="fleetManagementNav" style="display: none;">
+                                <a href="/fleet-management.html" class="nav-link" data-page="fleet-management">
+                                    <span class="nav-icon">🚗</span>
+                                    Fleet Management
+                                </a>
+                            </li>
+                            <li class="nav-item" id="userManagementNav" style="display: none;">
+                                <a href="/user-management.html" class="nav-link" data-page="user-management">
+                                    <span class="nav-icon">👥</span>
+                                    User Management
+                                </a>
+                            </li>
+                            <li class="nav-item" id="reportsNav" style="display: none;">
+                                <a href="/reports.html" class="nav-link" data-page="reports">
+                                    <span class="nav-icon">📈</span>
+                                    Reports
+                                </a>
+                            </li>
+                        </ul>
+                    </nav>
+                </aside>
+
+                <!-- Main Content -->
+                <main class="main-content">
+                    <div id="pageContent">
+                        <!-- Dashboard Content -->
+                        <div class="d-flex justify-between align-center mb-4">
+                            <h1 class="mb-0">Dashboard</h1>
+                            <div class="d-flex gap-2">
+                                <button class="btn btn-outline btn-sm" id="refreshBtn">
+                                    <span class="loading d-none" id="refreshLoading"></span>
+                                    Refresh
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Stats Grid -->
+                        <div class="stats-grid" id="statsGrid">
+                            <div class="stat-card">
+                                <div class="stat-value" id="totalRequests">-</div>
+                                <div class="stat-label">Total Requests</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-value" id="pendingRequests">-</div>
+                                <div class="stat-label">Pending Requests</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-value" id="approvedRequests">-</div>
+                                <div class="stat-label">Approved Requests</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-value" id="activeTrips">-</div>
+                                <div class="stat-label">Active Trips</div>
+                            </div>
+                        </div>
+
+                        <!-- Recent Activity -->
+                        <div class="card mb-4">
+                            <div class="card-header">
+                                <h3 class="mb-0">Recent Activity</h3>
+                            </div>
+                            <div class="card-body">
+                                <div id="recentActivity">
+                                    <div class="text-center text-muted">
+                                        <div class="loading"></div>
+                                        Loading recent activity...
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Quick Actions -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h3 class="mb-0">Quick Actions</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="d-flex gap-3">
+                                    <button class="btn btn-primary" id="quickNewRequest">
+                                        ➕ New Request
+                                    </button>
+                                    <button class="btn btn-outline" id="quickViewRequests">
+                                        📋 View My Requests
+                                    </button>
+                                    <button class="btn btn-outline" id="quickViewFleet" style="display: none;">
+                                        🚗 View Fleet
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </main>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="modal-overlay d-none">
+        <div class="card" style="padding: 2rem; text-align: center;">
+            <div class="loading" style="margin: 0 auto 1rem;"></div>
+            <div>Loading...</div>
+        </div>
+    </div>
+
     <script src="js/app.js" type="module"></script>
     <script>
         document.addEventListener('DOMContentLoaded', async () => {

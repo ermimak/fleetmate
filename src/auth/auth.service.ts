@@ -1,21 +1,23 @@
-import { Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
 
 import { User } from '../users/entities/user.entity';
-import { UsersService } from '../users/users.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 
 @Injectable()
 export class AuthService {
   constructor(
-    private usersService: UsersService,
+    @InjectRepository(User)
+    private userRepository: Repository<User>,
     private jwtService: JwtService,
   ) {}
 
   async validateUser(email: string, password: string): Promise<any> {
-    const user = await this.usersService.findByEmail(email);
+    const user = await this.userRepository.findOne({ where: { email } });
     
     if (user && await bcrypt.compare(password, user.password)) {
       const { password, ...result } = user;
@@ -35,7 +37,7 @@ export class AuthService {
       email: user.email, 
       sub: user.id, 
       role: user.role,
-      department: user.department ? user.department.id : null 
+      department: user.department 
     };
 
     return {
@@ -53,25 +55,37 @@ export class AuthService {
   }
 
   async register(registerDto: RegisterDto) {
-    const existingUser = await this.usersService.findByEmail(registerDto.email);
+    const existingUser = await this.userRepository.findOne({
+      where: { email: registerDto.email },
+    });
 
     if (existingUser) {
-      throw new BadRequestException('User with this email already exists');
+      throw new UnauthorizedException('User already exists');
     }
 
-    const user = await this.usersService.create(registerDto);
+    const hashedPassword = await bcrypt.hash(registerDto.password, 10);
 
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { password, ...result } = user;
+    const user = this.userRepository.create({
+      ...registerDto,
+      password: hashedPassword,
+    });
+
+    const savedUser = await this.userRepository.save(user);
+    const { password, ...result } = savedUser;
+
     return result;
   }
 
   async findUserById(id: string): Promise<User> {
-    return this.usersService.findOne(id);
+    return this.userRepository.findOne({ where: { id } });
   }
 
   async linkTelegramAccount(userId: string, telegramId: string, telegramUsername?: string) {
-    await this.usersService.updateTelegramInfo(userId, { telegramId, telegramUsername });
+    await this.userRepository.update(userId, {
+      telegramId,
+      telegramUsername,
+    });
+
     return this.findUserById(userId);
   }
 }

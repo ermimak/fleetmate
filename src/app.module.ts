@@ -13,7 +13,6 @@ import { RequestsModule } from './requests/requests.module';
 import { CarsModule } from './cars/cars.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { TelegramModule } from './telegram/telegram.module';
-import { DepartmentsModule } from './departments/departments.module';
 
 @Module({
   imports: [
@@ -34,7 +33,6 @@ import { DepartmentsModule } from './departments/departments.module';
     CarsModule,
     NotificationsModule,
     TelegramModule,
-    DepartmentsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Requests - FleetMate</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles/main.css">
+</head>
+<body>
+    <div class="main-layout">
+        <!-- Header -->
+        <header class="header">
+            <div class="container">
+                <div class="header-content">
+                    <a href="/dashboard.html" class="logo">FleetMate</a>
+                    <div class="user-menu">
+                        <span id="userWelcome" class="text-muted">Welcome, User</span>
+                        <div class="user-avatar" id="userAvatar">U</div>
+                        <button class="btn btn-outline btn-sm" id="logoutBtn">Logout</button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <div class="container">
+            <div class="content-wrapper">
+                <!-- Sidebar -->
+                <aside class="sidebar">
+                    <nav>
+                        <ul class="nav-menu">
+                            <li class="nav-item">
+                                <a href="/dashboard.html" class="nav-link" data-page="dashboard">
+                                    <span class="nav-icon">📊</span>
+                                    Dashboard
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a href="/my-requests.html" class="nav-link active" data-page="my-requests">
+                                    <span class="nav-icon">📋</span>
+                                    My Requests
+                                </a>
+                            </li>
+                            <li class="nav-item" id="newRequestNav">
+                                <a href="/new-request.html" class="nav-link" data-page="new-request">
+                                    <span class="nav-icon">➕</span>
+                                    New Request
+                                </a>
+                            </li>
+                            <li class="nav-item" id="approvalsNav" style="display: none;">
+                                <a href="/approvals.html" class="nav-link" data-page="approvals">
+                                    <span class="nav-icon">✅</span>
+                                    Approvals
+                                </a>
+                            </li>
+                            <li class="nav-item" id="manageRequestsNav" style="display: none;">
+                                <a href="/manage-requests.html" class="nav-link" data-page="manage-requests">
+                                    <span class="nav-icon">🗂️</span>
+                                    Manage Requests
+                                </a>
+                            </li>
+                            <li class="nav-item" id="fleetManagementNav" style="display: none;">
+                                <a href="/fleet-management.html" class="nav-link" data-page="fleet-management">
+                                    <span class="nav-icon">🚗</span>
+                                    Fleet Management
+                                </a>
+                            </li>
+                            <li class="nav-item" id="userManagementNav" style="display: none;">
+                                <a href="/user-management.html" class="nav-link" data-page="user-management">
+                                    <span class="nav-icon">👥</span>
+                                    User Management
+                                </a>
+                            </li>
+                            <li class="nav-item" id="reportsNav" style="display: none;">
+                                <a href="/reports.html" class="nav-link" data-page="reports">
+                                    <span class="nav-icon">📈</span>
+                                    Reports
+                                </a>
+                            </li>
+                        </ul>
+                    </nav>
+                </aside>
+
+                <!-- Main Content -->
+                <main class="main-content">
+                    <div id="pageContent">
+                        <!-- My Requests Content -->
+                        <div class="d-flex justify-between align-center mb-4">
+                            <h1 class="mb-0">My Requests</h1>
+                            <div class="d-flex gap-2">
+                                <button class="btn btn-primary" id="newRequestBtn">
+                                    ➕ New Request
+                                </button>
+                                <button class="btn btn-outline btn-sm" id="refreshRequestsBtn">
+                                    <span class="loading d-none" id="refreshLoading"></span>
+                                    Refresh
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Request Stats -->
+                        <div class="stats-grid mb-4">
+                            <div class="stat-card">
+                                <div class="stat-value" id="totalMyRequests">-</div>
+                                <div class="stat-label">Total Requests</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-value" id="pendingMyRequests">-</div>
+                                <div class="stat-label">Pending</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-value" id="approvedMyRequests">-</div>
+                                <div class="stat-label">Approved</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-value" id="completedMyRequests">-</div>
+                                <div class="stat-label">Completed</div>
+                            </div>
+                        </div>
+
+                        <!-- Filters -->
+                        <div class="card mb-4">
+                            <div class="card-body">
+                                <div class="d-flex gap-3 align-center">
+                                    <div class="form-group mb-0">
+                                        <select class="form-control form-select" id="statusFilter">
+                                            <option value="">All Status</option>
+                                            <option value="pending">Pending</option>
+                                            <option value="approved">Approved</option>
+                                            <option value="rejected">Rejected</option>
+                                            <option value="car_assigned">Car Assigned</option>
+                                            <option value="in_progress">In Progress</option>
+                                            <option value="completed">Completed</option>
+                                            <option value="cancelled">Cancelled</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group mb-0">
+                                        <input type="date" class="form-control" id="startDateFilter" placeholder="Start Date">
+                                    </div>
+                                    <div class="form-group mb-0">
+                                        <input type="date" class="form-control" id="endDateFilter" placeholder="End Date">
+                                    </div>
+                                    <button class="btn btn-outline" id="clearFilters">Clear</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Requests Table -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h3 class="mb-0">My Requests</h3>
+                            </div>
+                            <div class="card-body">
+                                <div id="requestsTableContainer">
+                                    <div class="text-center text-muted">
+                                        <div class="loading"></div>
+                                        Loading your requests...
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </main>
+            </div>
+        </div>
+    </div>
+
+    <!-- Request Details Modal -->
+    <div id="requestModal" class="modal-overlay d-none">
+        <div class="modal" style="max-width: 700px;">
+            <div class="modal-header">
+                <h2 class="modal-title">Request Details</h2>
+                <button class="modal-close" id="closeRequestModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="requestDetails">
+                    <div class="text-center text-muted">
+                        <div class="loading"></div>
+                        Loading request details...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cancel Request Modal -->
+    <div id="cancelModal" class="modal-overlay d-none">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 class="modal-title">Cancel Request</h2>
+                <button class="modal-close" id="closeCancelModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="cancelForm">
+                    <p>Are you sure you want to cancel this request?</p>
+                    <div class="form-group">
+                        <label class="form-label" for="cancelReason">Reason for cancellation</label>
+                        <textarea class="form-control" id="cancelReason" rows="3" placeholder="Please provide a reason for cancelling this request..."></textarea>
+                    </div>
+                    <div id="cancelError" class="alert alert-danger d-none"></div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline" id="cancelCancelBtn">Keep Request</button>
+                <button type="submit" class="btn btn-danger" id="confirmCancelBtn" form="cancelForm">
+                    <span class="loading d-none" id="cancelLoading"></span>
+                    Cancel Request
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="modal-overlay d-none">
+        <div class="card" style="padding: 2rem; text-align: center;">
+            <div class="loading" style="margin: 0 auto 1rem;"></div>
+            <div>Loading...</div>
+        </div>
+    </div>
+
+    <script src="js/app.js" type="module"></script>
+    <script>
+        // Initialize my requests when DOM is loaded
+        document.addEventListener('DOMContentLoaded', function() {
+            // This will be handled by app.js
+        });
+    </script>
+</body>
+</html>
