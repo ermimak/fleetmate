@@ -48,8 +48,6 @@ export class UsersController {
   }
 
   @Get('me')
-  @UseGuards(RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.AUTHORITY, UserRole.USER, UserRole.APPROVER)
   async getMe(@Request() req) {
     try {
       // The user object is attached to the request by the AuthGuard

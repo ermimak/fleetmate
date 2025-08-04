@@ -7,9 +7,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
     <link rel="stylesheet" href="styles/main.css">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </head>
 <body>
     <div class="main-layout">
@@ -34,51 +33,43 @@
                     <nav>
                         <ul class="nav-menu">
                             <li class="nav-item">
-                                <a href="/dashboard.html" class="nav-link active" data-page="dashboard">
-                                    <span class="nav-icon">📊</span>
-                                    Dashboard
+                                <a class="nav-link active" href="/dashboard.html" data-page="dashboard">
+                                    <i class="bi bi-grid-1x2-fill"></i> Dashboard
                                 </a>
                             </li>
                             <li class="nav-item">
-                                <a href="/my-requests.html" class="nav-link" data-page="my-requests">
-                                    <span class="nav-icon">📋</span>
-                                    My Requests
+                                <a class="nav-link" href="/my-requests.html" data-page="my-requests">
+                                    <i class="bi bi-journal-text"></i> My Requests
                                 </a>
                             </li>
                             <li class="nav-item" id="newRequestNav">
-                                <a href="/new-request.html" class="nav-link" data-page="new-request">
-                                    <span class="nav-icon">➕</span>
-                                    New Request
+                                <a class="nav-link" href="/new-request.html" data-page="new-request">
+                                    <i class="bi bi-plus-circle-fill"></i> New Request
                                 </a>
                             </li>
                             <li class="nav-item" id="approvalsNav" style="display: none;">
-                                <a href="/approvals.html" class="nav-link" data-page="approvals">
-                                    <span class="nav-icon">✅</span>
-                                    Approvals
+                                <a class="nav-link" href="/approvals.html" data-page="approvals">
+                                    <i class="bi bi-check2-circle"></i> Approvals
                                 </a>
                             </li>
                             <li class="nav-item" id="manageRequestsNav" style="display: none;">
-                                <a href="/manage-requests.html" class="nav-link" data-page="manage-requests">
-                                    <span class="nav-icon">🗂️</span>
-                                    Manage Requests
+                                <a class="nav-link" href="/manage-requests.html" data-page="manage-requests">
+                                    <i class="bi bi-card-list"></i> Manage Requests
                                 </a>
                             </li>
                             <li class="nav-item" id="fleetManagementNav" style="display: none;">
-                                <a href="/fleet-management.html" class="nav-link" data-page="fleet-management">
-                                    <span class="nav-icon">🚗</span>
-                                    Fleet Management
+                                <a class="nav-link" href="/fleet-management.html" data-page="fleet-management">
+                                    <i class="bi bi-truck"></i> Fleet Management
                                 </a>
                             </li>
                             <li class="nav-item" id="userManagementNav" style="display: none;">
-                                <a href="/user-management.html" class="nav-link" data-page="user-management">
-                                    <span class="nav-icon">👥</span>
-                                    User Management
+                                <a class="nav-link" href="/user-management.html" data-page="user-management">
+                                    <i class="bi bi-people"></i> User Management
                                 </a>
                             </li>
                             <li class="nav-item" id="reportsNav" style="display: none;">
-                                <a href="/reports.html" class="nav-link" data-page="reports">
-                                    <span class="nav-icon">📈</span>
-                                    Reports
+                                <a class="nav-link" href="/reports.html" data-page="reports">
+                                    <i class="bi bi-bar-chart-line"></i> Reports
                                 </a>
                             </li>
                         </ul>
@@ -89,18 +80,15 @@
                 <main class="main-content">
                     <div id="pageContent">
                         <!-- Dashboard Content -->
-                        <div class="d-flex justify-between align-center mb-4">
+                        <div class="d-flex justify-content-between align-items-center mb-4">
                             <h1 class="mb-0">Dashboard</h1>
-                            <div class="d-flex gap-2">
-                                <button class="btn btn-outline btn-sm" id="refreshBtn">
-                                    <span class="loading d-none" id="refreshLoading"></span>
-                                    Refresh
-                                </button>
-                            </div>
+                            <a href="/new-request.html" class="btn btn-primary">
+                                <i class="bi bi-plus-circle-fill"></i> New Request
+                            </a>
                         </div>
 
                         <!-- Stats Grid -->
-                        <div class="stats-grid" id="statsGrid">
+                        <div class="stats-grid mb-4" id="statsGrid">
                             <div class="stat-card">
                                 <div class="stat-value" id="totalRequests">-</div>
                                 <div class="stat-label">Total Requests</div>
@@ -119,37 +107,44 @@
                             </div>
                         </div>
 
-                        <!-- Recent Activity -->
-                        <div class="card mb-4">
-                            <div class="card-header">
-                                <h3 class="mb-0">Recent Activity</h3>
-                            </div>
-                            <div class="card-body">
-                                <div id="recentActivity">
-                                    <div class="text-center text-muted">
-                                        <div class="loading"></div>
-                                        Loading recent activity...
+                        <div class="row">
+                            <div class="col-lg-8">
+                                <!-- Recent Activity -->
+                                <div class="card mb-4">
+                                    <div class="card-header">
+                                        <h3 class="mb-0">Recent Activity</h3>
+                                    </div>
+                                    <div class="card-body">
+                                        <div id="recentActivity">
+                                            <div class="text-center text-muted p-4">
+                                                <div class="spinner-border spinner-border-sm" role="status">
+                                                  <span class="visually-hidden">Loading...</span>
+                                                </div>
+                                                <span class="ms-2">Loading recent activity...</span>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
-                        </div>
-
-                        <!-- Quick Actions -->
-                        <div class="card">
-                            <div class="card-header">
-                                <h3 class="mb-0">Quick Actions</h3>
-                            </div>
-                            <div class="card-body">
-                                <div class="d-flex gap-3">
-                                    <button class="btn btn-primary" id="quickNewRequest">
-                                        ➕ New Request
-                                    </button>
-                                    <button class="btn btn-outline" id="quickViewRequests">
-                                        📋 View My Requests
-                                    </button>
-                                    <button class="btn btn-outline" id="quickViewFleet" style="display: none;">
-                                        🚗 View Fleet
-                                    </button>
+                            <div class="col-lg-4">
+                                <!-- Quick Actions -->
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h3 class="mb-0">Quick Actions</h3>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="d-grid gap-2">
+                                            <a href="/new-request.html" class="btn btn-primary" id="quickNewRequest">
+                                                <i class="bi bi-plus-circle"></i> New Request
+                                            </a>
+                                            <a href="/my-requests.html" class="btn btn-outline-secondary" id="quickViewRequests">
+                                                <i class="bi bi-journal-text"></i> View My Requests
+                                            </a>
+                                            <a href="/fleet-management.html" class="btn btn-outline-secondary" id="quickViewFleet" style="display: none;">
+                                                <i class="bi bi-truck"></i> View Fleet
+                                            </a>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -159,114 +154,6 @@
         </div>
     </div>
 
-    <!-- Loading Overlay -->
-    <div id="loadingOverlay" class="modal-overlay d-none">
-        <div class="card" style="padding: 2rem; text-align: center;">
-            <div class="loading" style="margin: 0 auto 1rem;"></div>
-            <div>Loading...</div>
-        </div>
-    </div>
-
     <script src="js/app.js" type="module"></script>
-    <script>
-        document.addEventListener('DOMContentLoaded', async () => {
-            // Check authentication
-            if (!window.api?.token) {
-                window.location.href = '/login.html';
-                return;
-            }
-
-            // Load user data
-            try {
-                const user = await window.api.getCurrentUser();
-                if (!user) throw new Error('User not found');
-                
-                // Update UI with user data
-                const userGreeting = document.getElementById('userGreeting');
-                if (userGreeting) {
-                    userGreeting.textContent = `Welcome, ${user.firstName || 'User'}`;
-                }
-                
-                // Load requests
-                const requests = await window.api.getRequests().catch(() => []);
-                
-                // Update requests summary
-                const myRequestsElement = document.getElementById('myRequests');
-                if (myRequestsElement) {
-                    const pendingCount = requests.filter(r => r.status === 'PENDING').length;
-                    const approvedCount = requests.filter(r => r.status === 'APPROVED').length;
-                    
-                    myRequestsElement.innerHTML = `
-                        <div class="d-flex justify-content-between mb-3">
-                            <div>
-                                <div class="text-muted small">Pending</div>
-                                <h3 class="mb-0">${pendingCount}</h3>
-                            </div>
-                            <div class="text-end">
-                                <div class="text-muted small">Approved</div>
-                                <h3 class="mb-0">${approvedCount}</h3>
-                            </div>
-                        </div>
-                        <a href="/requests.html" class="btn btn-primary btn-sm">View All Requests</a>
-                    `;
-                }
-                
-            } catch (error) {
-                console.error('Error loading dashboard:', error);
-                window.location.href = '/login.html';
-            }
-            
-            // Handle logout
-            const logoutBtn = document.getElementById('logoutBtn');
-            if (logoutBtn) {
-                logoutBtn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    window.api.logout();
-                    window.location.href = '/login.html';
-                });
-            }
-        });
-    </script>
-</head>
-<body>
-    <div id="app">
-        <header class="header">
-            <div class="container">
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <h1>FleetMate</h1>
-                    <div>
-                        <span id="userGreeting">Welcome, User</span>
-                        <button id="logoutBtn" class="btn btn-secondary">Logout</button>
-                    </div>
-                </div>
-            </div>
-        </header>
-        
-        <main class="container mt-4">
-            <div class="row">
-                <div class="col-md-3">
-                    <div class="card">
-                        <div class="card-body">
-                            <h5 class="card-title">My Requests</h5>
-                            <div id="myRequests">
-                                <p>Loading your requests...</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="col-md-9">
-                    <div class="card">
-                        <div class="card-body">
-                            <h5 class="card-title">Recent Activity</h5>
-                            <div id="recentActivity">
-                                <p>Loading recent activity...</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </main>
-    </div>
 </body>
 </html>
