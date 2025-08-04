@@ -646,6 +646,7 @@ async function initProtectedPage(currentPage, user) {
             case 'approvals': await initApprovals(); break;
             case 'manage-requests': await initManageRequests(); break;
             case 'reports': await initReports(); break;
+            case 'new-request': await initNewRequestPage(); break;
             // No default case needed, non-matching pages will just have nav/events setup.
         }
     } catch (error) {
@@ -815,7 +816,164 @@ async function loadManageRequestsTable(requests) {
 }
 
 function setupManageRequestsEvents() {
-    console.log('Manage requests events setup - placeholder');
+    const container = document.getElementById('requestsTableContainer');
+    if (!container) return;
+
+    // --- Modal Elements ---
+    const requestModal = document.getElementById('requestModal');
+    const statusModal = document.getElementById('statusModal');
+    const assignModal = document.getElementById('assignModal');
+    const tripModal = document.getElementById('tripModal');
+
+    if (!requestModal || !statusModal || !assignModal || !tripModal) {
+        console.error('One or more modals for Manage Requests page are missing!');
+        return;
+    }
+
+    // --- Modal Instances ---
+    const bsRequestModal = new bootstrap.Modal(requestModal);
+    const bsStatusModal = new bootstrap.Modal(statusModal);
+    const bsAssignModal = new bootstrap.Modal(assignModal);
+    const bsTripModal = new bootstrap.Modal(tripModal);
+
+    let currentRequestId = null;
+
+    // --- Event Listeners for table actions ---
+    container.addEventListener('click', async (e) => {
+        const target = e.target.closest('.view-request-btn, .update-status-btn, .assign-vehicle-btn, .manage-trip-btn');
+        if (!target) return;
+
+        const requestId = target.closest('tr')?.dataset.requestId;
+        if (!requestId) return;
+        currentRequestId = requestId;
+
+        if (target.classList.contains('view-request-btn')) {
+            const detailsContainer = document.getElementById('requestDetails');
+            detailsContainer.innerHTML = '<div class="text-center"><div class="loading"></div></div>';
+            bsRequestModal.show();
+            try {
+                const request = await api.getRequestById(requestId);
+                detailsContainer.innerHTML = `
+                    <div class="row">
+                        <div class="col-md-6">
+                            <p><strong>Requester:</strong> ${request.user.firstName} ${request.user.lastName}</p>
+                            <p><strong>Destination:</strong> ${request.destination}</p>
+                            <p><strong>Purpose:</strong> ${request.purpose}</p>
+                            <p><strong>Passengers:</strong> ${request.passengerCount}</p>
+                        </div>
+                        <div class="col-md-6">
+                            <p><strong>Start Time:</strong> ${formatDate(request.startTime)}</p>
+                            <p><strong>End Time:</strong> ${formatDate(request.endTime)}</p>
+                            <p><strong>Status:</strong> ${getStatusBadge(request.status)}</p>
+                            <p><strong>Priority:</strong> ${request.priority || 'N/A'}</p>
+                        </div>
+                    </div>
+                    <hr>
+                    <p><strong>Assigned Vehicle:</strong> ${request.car ? `${request.car.make} ${request.car.model}` : 'Not Assigned'}</p>
+                    <p><strong>Assigned Driver:</strong> ${request.driver ? `${request.driver.firstName} ${request.driver.lastName}` : 'Not Assigned'}</p>
+                    <hr>
+                    <p><strong>Additional Info:</strong></p>
+                    <p>${request.additionalInfo || 'None'}</p>
+                `;
+            } catch (error) {
+                detailsContainer.innerHTML = '<p class="text-danger">Failed to load request details.</p>';
+            }
+        } else if (target.classList.contains('update-status-btn')) {
+            document.getElementById('statusForm').reset();
+            bsStatusModal.show();
+        } else if (target.classList.contains('assign-vehicle-btn')) {
+            // TODO: Load vehicles and drivers into selects
+            bsAssignModal.show();
+        } else if (target.classList.contains('manage-trip-btn')) {
+            // TODO: Logic to show start or complete trip section
+            bsTripModal.show();
+        }
+    });
+
+    // --- Event listener for status update form ---
+    document.getElementById('statusForm')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const newStatus = document.getElementById('newStatus').value;
+        const reason = document.getElementById('statusReason').value;
+        if (!newStatus || !currentRequestId) return;
+
+        try {
+            await api.updateRequestStatus(currentRequestId, newStatus, reason);
+            showAlert('Status updated successfully!', 'success');
+            bsStatusModal.hide();
+            loadManageRequestsTable(); // Refresh table
+        } catch (error) {
+            showAlert(error.message || 'Failed to update status.', 'danger', 'statusError');
+        }
+    });
+    
+    // --- Filter and Refresh Listeners ---
+    document.getElementById('refreshRequestsBtn')?.addEventListener('click', loadManageRequestsTable);
+    document.getElementById('statusFilter')?.addEventListener('change', loadManageRequestsTable);
+    document.getElementById('priorityFilter')?.addEventListener('change', loadManageRequestsTable);
+    document.getElementById('searchRequests')?.addEventListener('input', (e) => {
+        // Basic debouncing
+        setTimeout(() => {
+            if(document.getElementById('searchRequests').value === e.target.value) {
+                loadManageRequestsTable();
+            }
+        }, 500);
+    });
+    document.getElementById('clearFilters')?.addEventListener('click', () => {
+        document.getElementById('statusFilter').value = '';
+        document.getElementById('priorityFilter').value = '';
+        document.getElementById('searchRequests').value = '';
+        loadManageRequestsTable();
+    });
+}
+
+async function initNewRequestPage() {
+    const form = document.getElementById('requestForm');
+    if (!form) return;
+
+    const departureDateEl = document.getElementById('departureDate');
+    const returnDateEl = document.getElementById('returnDate');
+
+    // Set minimum date/time to now
+    const now = new Date();
+    const timezoneOffset = now.getTimezoneOffset() * 60000;
+    const localISOTime = new Date(now - timezoneOffset).toISOString().slice(0, 16);
+
+    departureDateEl.min = localISOTime;
+    returnDateEl.min = localISOTime;
+    departureDateEl.value = localISOTime;
+
+    departureDateEl.addEventListener('change', (e) => {
+        returnDateEl.min = e.target.value;
+        if (returnDateEl.value < e.target.value) {
+            returnDateEl.value = e.target.value;
+        }
+    });
+
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const requestData = {
+            destination: document.getElementById('destination').value,
+            purpose: document.getElementById('purpose').value,
+            startTime: document.getElementById('departureDate').value,
+            endTime: document.getElementById('returnDate').value,
+            passengerCount: parseInt(document.getElementById('passengers').value, 10) || 1,
+            additionalInfo: document.getElementById('comments').value,
+        };
+
+        if (new Date(requestData.endTime) <= new Date(requestData.startTime)) {
+            showAlert('Return date must be after departure date.', 'danger');
+            return;
+        }
+
+        try {
+            await api.createRequest(requestData);
+            window.location.href = '/my-requests.html';
+        } catch (error) {
+            console.error('Error creating request:', error);
+            showAlert(error.message || 'Failed to create request. Please try again.', 'danger');
+        }
+    });
 }
 
 async function initReports() {
@@ -875,282 +1033,444 @@ function loadOverdueRequestsTable(requests) {
 }
 
 async function loadUsersTable() {
-    const tableBody = document.querySelector('#usersTable tbody');
-    if (!tableBody) return;
+    const container = document.getElementById('usersTableContainer');
+    if (!container) return;
 
-    showLoading('usersTable');
-    tableBody.innerHTML = ''; 
+    container.innerHTML = `<div class="text-center text-muted"><div class="loading"></div> Loading users...</div>`;
 
     try {
         const users = await api.getUsers();
+        
+        // Update stats
+        document.getElementById('totalUsers').textContent = users.length;
+        document.getElementById('adminUsers').textContent = users.filter(u => u.role === 'admin').length;
+
         if (users.length === 0) {
-            tableBody.innerHTML = '<tr><td colspan="6" class="text-center">No users found.</td></tr>';
+            container.innerHTML = '<p class="text-center text-muted">No users found.</p>';
             return;
         }
 
-        const rowsHtml = users.map(user => `
-            <tr data-user-id="${user.id}">
-                <td>${user.firstName} ${user.lastName || ''}</td>
-                <td>${user.email}</td>
-                <td>${user.role}</td>
-                <td>${user.isVerified ? '<span class="badge bg-success">Verified</span>' : '<span class="badge bg-warning">Pending</span>'}</td>
-                <td>${formatDate(user.createdAt)}</td>
-                <td>
-                    <button class="btn btn-sm btn-info edit-user-btn">Edit</button>
-                    <button class="btn btn-sm btn-danger delete-user-btn">Delete</button>
-                </td>
-            </tr>
-        `).join('');
-        tableBody.innerHTML = rowsHtml;
+        const tableHtml = `
+            <table class="table" id="usersTable">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Email</th>
+                        <th>Role</th>
+                        <th>Department</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${users.map(user => `
+                        <tr data-user-id="${user.id}">
+                            <td>${user.firstName} ${user.lastName}</td>
+                            <td>${user.email}</td>
+                            <td><span class="badge badge-role-${user.role}">${user.role}</span></td>
+                            <td>${user.department || 'N/A'}</td>
+                            <td><span class="badge badge-status-${user.status || 'active'}">${user.status || 'Active'}</span></td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-primary edit-user-btn">Edit</button>
+                                <button class="btn btn-sm btn-outline-danger delete-user-btn">Delete</button>
+                            </td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        `;
+        container.innerHTML = tableHtml;
     } catch (error) {
-        console.error('Error loading users table:', error);
-        showAlert('Failed to load users.', 'danger');
-        tableBody.innerHTML = '<tr><td colspan="6" class="text-center text-danger">Failed to load users.</td></tr>';
-    } finally {
-        hideLoading('usersTable');
+        console.error('Failed to load users:', error);
+        container.innerHTML = `<p class="text-center text-danger">Error loading users. Please try again.</p>`;
     }
 }
 
 function setupUserManagementEvents() {
-    const newUserBtn = document.getElementById('newUserBtn');
-    const userModalElement = document.getElementById('userModal');
-    if (!userModalElement) return;
+    const userModalEl = document.getElementById('userModal');
+    const deleteModalEl = document.getElementById('deleteModal');
+    if (!userModalEl || !deleteModalEl) {
+        console.error('User management modals not found!');
+        return;
+    }
 
-    const userModal = new bootstrap.Modal(userModalElement);
+    const userModal = new bootstrap.Modal(userModalEl);
+    const deleteModal = new bootstrap.Modal(deleteModalEl);
     const userForm = document.getElementById('userForm');
-    const usersTable = document.getElementById('usersTable');
-    const modalTitle = document.getElementById('userModalLabel');
-    let editingUserId = null;
+    let currentUserId = null;
 
-    if (newUserBtn) {
-        newUserBtn.addEventListener('click', () => {
-            editingUserId = null;
-            modalTitle.textContent = 'Add New User';
-            userForm.reset();
-            document.getElementById('password-group').style.display = 'block';
-            userModal.show();
-        });
-    }
+    document.getElementById('createUserBtn').addEventListener('click', () => {
+        currentUserId = null;
+        userForm.reset();
+        document.getElementById('userModalTitle').textContent = 'Create User';
+        document.getElementById('passwordGroup').style.display = 'block';
+        document.getElementById('password').required = true;
+        document.getElementById('formError').classList.add('d-none');
+        userModal.show();
+    });
 
-    if (userForm) {
-        userForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const formData = new FormData(userForm);
-            const userData = Object.fromEntries(formData.entries());
-            
-            userData.isVerified = userData.isVerified === 'on';
+    document.getElementById('usersTableContainer').addEventListener('click', async (e) => {
+        const target = e.target.closest('.edit-user-btn, .delete-user-btn');
+        if (!target) return;
+        
+        const userId = target.closest('tr')?.dataset.userId;
+        if (!userId) return;
 
+        currentUserId = userId;
+
+        if (target.classList.contains('edit-user-btn')) {
             try {
-                if (editingUserId) {
-                    if (!userData.password) {
-                        delete userData.password;
-                    }
-                    await api.updateUser(editingUserId, userData);
-                    showAlert('User updated successfully.', 'success');
-                } else {
-                    await api.createUser(userData);
-                    showAlert('User created successfully.', 'success');
-                }
-                userModal.hide();
-                await loadUsersTable();
+                const user = await api.getUserById(userId);
+                
+                document.getElementById('userModalTitle').textContent = 'Edit User';
+                document.getElementById('firstName').value = user.firstName;
+                document.getElementById('lastName').value = user.lastName;
+                document.getElementById('email').value = user.email;
+                document.getElementById('role').value = user.role;
+                document.getElementById('department').value = user.department || '';
+                document.getElementById('position').value = user.position || '';
+                document.getElementById('phoneNumber').value = user.phoneNumber || '';
+                document.getElementById('status').value = user.status || 'active';
+
+                document.getElementById('passwordGroup').style.display = 'none';
+                document.getElementById('password').required = false;
+                document.getElementById('formError').classList.add('d-none');
+                userModal.show();
             } catch (error) {
-                console.error('Error saving user:', error);
-                showAlert(error.message || 'Failed to save user.', 'danger', 'userModalAlerts');
+                console.error(`Failed to fetch user ${userId} for editing:`, error);
+                showAlert('Could not load user data. Please try again.', 'danger');
             }
-        });
-    }
+        } else if (target.classList.contains('delete-user-btn')) {
+            deleteModal.show();
+        }
+    });
 
-    if (usersTable) {
-        usersTable.addEventListener('click', async (e) => {
-            const target = e.target;
-            const userRow = target.closest('tr');
-            if (!userRow) return;
-            
-            const userId = userRow.dataset.userId;
+    userForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const saveBtn = document.getElementById('saveUserBtn');
+        const loadingSpan = saveBtn.querySelector('.loading');
+        
+        saveBtn.disabled = true;
+        loadingSpan.classList.remove('d-none');
 
-            if (target.classList.contains('edit-user-btn')) {
-                editingUserId = userId;
-                try {
-                    const user = await api.getUserById(userId);
-                    modalTitle.textContent = 'Edit User';
-                    userForm.reset();
-                    
-                    Object.keys(user).forEach(key => {
-                        const input = userForm.elements[key];
-                        if (input) {
-                            if (input.type === 'checkbox') {
-                                input.checked = user[key];
-                            } else {
-                                input.value = user[key];
-                            }
-                        }
-                    });
-                    
-                    document.getElementById('password-group').style.display = 'none';
-                    userModal.show();
-                } catch (error) {
-                    showAlert('Failed to fetch user data for editing.', 'danger');
-                }
+        const userData = {
+            firstName: document.getElementById('firstName').value,
+            lastName: document.getElementById('lastName').value,
+            email: document.getElementById('email').value,
+            role: document.getElementById('role').value,
+            department: document.getElementById('department').value,
+            position: document.getElementById('position').value,
+            phoneNumber: document.getElementById('phoneNumber').value,
+            status: document.getElementById('status').value,
+        };
+
+        try {
+            if (currentUserId) { // Editing user
+                await api.updateUser(currentUserId, userData);
+                showAlert('User updated successfully!', 'success');
+            } else { // Creating user
+                userData.password = document.getElementById('password').value;
+                await api.createUser(userData);
+                showAlert('User created successfully!', 'success');
             }
+            userModal.hide();
+            loadUsersTable();
+        } catch (error) {
+            showAlert(error.message || 'Failed to save user.', 'danger', 'formError');
+        } finally {
+            saveBtn.disabled = false;
+            loadingSpan.classList.add('d-none');
+        }
+    });
 
-            if (target.classList.contains('delete-user-btn')) {
-                if (confirm('Are you sure you want to delete this user?')) {
-                    try {
-                        await api.deleteUser(userId);
-                        showAlert('User deleted successfully.', 'success');
-                        await loadUsersTable();
-                    } catch (error) {
-                        showAlert('Failed to delete user.', 'danger');
-                    }
-                }
-            }
-        });
-    }
+    document.getElementById('confirmDeleteBtn').addEventListener('click', async () => {
+        if (!currentUserId) return;
+        const deleteBtn = document.getElementById('confirmDeleteBtn');
+        const loadingSpan = deleteBtn.querySelector('.loading');
+
+        deleteBtn.disabled = true;
+        loadingSpan.classList.remove('d-none');
+
+        try {
+            await api.deleteUser(currentUserId);
+            showAlert('User deleted successfully.', 'success');
+            deleteModal.hide();
+            loadUsersTable();
+        } catch (error) {
+            showAlert('Failed to delete user.', 'danger');
+        } finally {
+            deleteBtn.disabled = false;
+            loadingSpan.classList.add('d-none');
+        }
+    });
+
+    document.getElementById('refreshUsersBtn')?.addEventListener('click', loadUsersTable);
 }
 
 function setupFleetManagementEvents() {
-    const newVehicleBtn = document.getElementById('newVehicleBtn');
-    const vehicleModalElement = document.getElementById('vehicleModal');
-    if (!vehicleModalElement) return;
+    const vehicleModalEl = document.getElementById('vehicleModal');
+    const deleteModalEl = document.getElementById('deleteModal');
+    if (!vehicleModalEl || !deleteModalEl) {
+        console.error('Fleet management modals not found!');
+        return;
+    }
 
-    const vehicleModal = new bootstrap.Modal(vehicleModalElement);
+    const vehicleModal = new bootstrap.Modal(vehicleModalEl);
+    const deleteModal = new bootstrap.Modal(deleteModalEl);
     const vehicleForm = document.getElementById('vehicleForm');
-    const vehiclesTable = document.getElementById('vehiclesTable');
-    const modalTitle = document.getElementById('vehicleModalLabel');
-    let editingVehicleId = null;
+    let currentVehicleId = null;
 
-    if (newVehicleBtn) {
-        newVehicleBtn.addEventListener('click', () => {
-            editingVehicleId = null;
-            modalTitle.textContent = 'Add New Vehicle';
-            vehicleForm.reset();
-            vehicleModal.show();
-        });
-    }
+    document.getElementById('addVehicleBtn')?.addEventListener('click', () => {
+        currentVehicleId = null;
+        vehicleForm.reset();
+        document.getElementById('vehicleModalTitle').textContent = 'Add Vehicle';
+        document.getElementById('formError').classList.add('d-none');
+        vehicleModal.show();
+    });
 
-    if (vehicleForm) {
-        vehicleForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const formData = new FormData(vehicleForm);
-            const vehicleData = Object.fromEntries(formData.entries());
-            vehicleData.passengerCount = parseInt(vehicleData.passengerCount, 10);
+    document.getElementById('vehiclesTableContainer')?.addEventListener('click', async (e) => {
+        const target = e.target.closest('.edit-vehicle-btn, .delete-vehicle-btn');
+        if (!target) return;
 
+        const vehicleId = target.closest('tr')?.dataset.vehicleId;
+        if (!vehicleId) return;
+        currentVehicleId = vehicleId;
+
+        if (target.classList.contains('edit-vehicle-btn')) {
             try {
-                if (editingVehicleId) {
-                    await api.updateCar(editingVehicleId, vehicleData);
-                    showAlert('Vehicle updated successfully.', 'success');
-                } else {
-                    await api.createCar(vehicleData);
-                    showAlert('Vehicle created successfully.', 'success');
-                }
-                vehicleModal.hide();
-                await loadVehiclesTable();
+                const vehicle = await api.getCarById(vehicleId);
+                document.getElementById('vehicleModalTitle').textContent = 'Edit Vehicle';
+                // Populate form
+                document.getElementById('make').value = vehicle.make;
+                document.getElementById('model').value = vehicle.model;
+                document.getElementById('year').value = vehicle.year;
+                document.getElementById('licensePlate').value = vehicle.licensePlate;
+                document.getElementById('type').value = vehicle.type;
+                document.getElementById('capacity').value = vehicle.capacity;
+                document.getElementById('fuelType').value = vehicle.fuelType;
+                document.getElementById('mileage').value = vehicle.mileage || '';
+                document.getElementById('vehicleStatus').value = vehicle.status;
+                document.getElementById('notes').value = vehicle.notes || '';
+                vehicleModal.show();
             } catch (error) {
-                console.error('Error saving vehicle:', error);
-                showAlert(error.message || 'Failed to save vehicle.', 'danger', 'vehicleModalAlerts');
+                showAlert('Failed to load vehicle data for editing.', 'danger');
             }
-        });
-    }
+        } else if (target.classList.contains('delete-vehicle-btn')) {
+            deleteModal.show();
+        }
+    });
 
-    if (vehiclesTable) {
-        vehiclesTable.addEventListener('click', async (e) => {
-            const target = e.target;
-            const vehicleRow = target.closest('tr');
-            if (!vehicleRow) return;
+    vehicleForm?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const vehicleData = {
+            make: document.getElementById('make').value,
+            model: document.getElementById('model').value,
+            year: parseInt(document.getElementById('year').value, 10),
+            licensePlate: document.getElementById('licensePlate').value,
+            type: document.getElementById('type').value,
+            capacity: parseInt(document.getElementById('capacity').value, 10),
+            fuelType: document.getElementById('fuelType').value,
+            mileage: parseInt(document.getElementById('mileage').value, 10) || 0,
+            status: document.getElementById('vehicleStatus').value,
+            notes: document.getElementById('notes').value,
+        };
 
-            const vehicleId = vehicleRow.dataset.vehicleId;
-
-            if (target.classList.contains('edit-vehicle-btn')) {
-                editingVehicleId = vehicleId;
-                try {
-                    const vehicle = await api.getCarById(vehicleId);
-                    modalTitle.textContent = 'Edit Vehicle';
-                    vehicleForm.reset();
-                    Object.keys(vehicle).forEach(key => {
-                        const input = vehicleForm.elements[key];
-                        if (input) input.value = vehicle[key];
-                    });
-                    vehicleModal.show();
-                } catch (error) {
-                    showAlert('Failed to fetch vehicle data for editing.', 'danger');
-                }
+        try {
+            if (currentVehicleId) {
+                await api.updateCar(currentVehicleId, vehicleData);
+                showAlert('Vehicle updated successfully!', 'success');
+            } else {
+                await api.createCar(vehicleData);
+                showAlert('Vehicle added successfully!', 'success');
             }
+            vehicleModal.hide();
+            await loadVehiclesTable();
+        } catch (error) {
+            showAlert(error.message || 'Failed to save vehicle.', 'danger', 'formError');
+        }
+    });
 
-            if (target.classList.contains('delete-vehicle-btn')) {
-                if (confirm('Are you sure you want to delete this vehicle?')) {
-                    try {
-                        await api.deleteCar(vehicleId);
-                        showAlert('Vehicle deleted successfully.', 'success');
-                        await loadVehiclesTable();
-                    } catch (error) {
-                        showAlert('Failed to delete vehicle.', 'danger');
-                    }
-                }
+    document.getElementById('confirmDeleteBtn')?.addEventListener('click', async () => {
+        if (!currentVehicleId) return;
+        try {
+            await api.deleteCar(currentVehicleId);
+            showAlert('Vehicle deleted successfully.', 'success');
+            deleteModal.hide();
+            await loadVehiclesTable();
+        } catch (error) {
+            showAlert('Failed to delete vehicle.', 'danger');
+        }
+    });
+
+    // --- Filter and Refresh Listeners ---
+    document.getElementById('refreshFleetBtn')?.addEventListener('click', loadVehiclesTable);
+    document.getElementById('statusFilter')?.addEventListener('change', loadVehiclesTable);
+    document.getElementById('typeFilter')?.addEventListener('change', loadVehiclesTable);
+    document.getElementById('searchVehicles')?.addEventListener('input', (e) => {
+        setTimeout(() => {
+            if (document.getElementById('searchVehicles').value === e.target.value) {
+                loadVehiclesTable();
             }
-        });
-    }
+        }, 500);
+    });
+    document.getElementById('clearFilters')?.addEventListener('click', () => {
+        document.getElementById('statusFilter').value = '';
+        document.getElementById('typeFilter').value = '';
+        document.getElementById('searchVehicles').value = '';
+        loadVehiclesTable();
+    });
 }
-
 function setupMyRequestsEvents() {
-    const requestsTable = document.getElementById('myRequestsTable');
-    if (!requestsTable) return;
+    const container = document.getElementById('requestsTableContainer');
+    if (!container) return;
 
-    requestsTable.addEventListener('click', e => {
+    const modal = document.getElementById('requestModal');
+    const modalDetails = document.getElementById('requestDetails');
+    const closeModalBtn = document.getElementById('closeRequestModal');
+
+    if (!modal || !modalDetails || !closeModalBtn) {
+        console.error('Request details modal elements not found!');
+        return;
+    }
+
+    const showModal = () => modal.classList.remove('d-none');
+    const hideModal = () => modal.classList.add('d-none');
+
+    closeModalBtn.addEventListener('click', hideModal);
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) { 
+            hideModal();
+        }
+    });
+
+    container.addEventListener('click', async (e) => {
         if (e.target.classList.contains('view-my-request-btn')) {
             const requestId = e.target.closest('tr').dataset.requestId;
-            // In a full implementation, this would open a detailed modal.
-            // For now, we can just show a simple alert or log it.
-            console.log(`Viewing details for request ${requestId}`);
-            showAlert(`Viewing details for request #${requestId}. Modal not yet implemented.`);
+            if (!requestId) return;
+
+            modalDetails.innerHTML = `<div class="text-center text-muted"><div class="loading"></div> Loading request details...</div>`;
+            showModal();
+
+            try {
+                const request = await api.getRequestById(requestId);
+                modalDetails.innerHTML = renderRequestDetails(request);
+            } catch (error) {
+                console.error(`Error fetching details for request ${requestId}:`, error);
+                modalDetails.innerHTML = `<p class="text-danger">Failed to load request details. Please try again.</p>`;
+            }
         }
     });
 }
 
+function renderRequestDetails(request) {
+    const assignedCar = request.car;
+    const approver = request.approvedBy;
+
+    return `
+        <div class="row">
+            <div class="col-md-6">
+                <h5>Trip Information</h5>
+                <p><strong>Purpose:</strong> ${request.purpose}</p>
+                <p><strong>Destination:</strong> ${request.destination}</p>
+                <p><strong>Departure:</strong> ${formatDate(request.startTime)}</p>
+                <p><strong>Return:</strong> ${formatDate(request.endTime)}</p>
+                <p><strong>Passengers:</strong> ${request.passengerCount}</p>
+            </div>
+            <div class="col-md-6">
+                <h5>Status & Approval</h5>
+                <p><strong>Status:</strong> ${getStatusBadge(request.status)}</p>
+                ${approver ? `
+                    <p><strong>Approver:</strong> ${approver.firstName} ${approver.lastName}</p>
+                    <p><strong>Approval Date:</strong> ${formatDate(request.approvalDate)}</p>
+                ` : ''}
+                ${request.status === 'rejected' && request.rejectionReason ? `
+                    <p><strong>Rejection Reason:</strong> ${request.rejectionReason}</p>
+                ` : ''}
+            </div>
+        </div>
+        <hr>
+        ${assignedCar ? `
+            <h5>Assigned Vehicle</h5>
+            <div class="row">
+                <div class="col-md-6">
+                    <p><strong>Vehicle:</strong> ${assignedCar.make} ${assignedCar.model} (${assignedCar.year})</p>
+                    <p><strong>License Plate:</strong> ${assignedCar.licensePlate}</p>
+                </div>
+                <div class="col-md-6">
+                    <p><strong>Color:</strong> ${assignedCar.color}</p>
+                    <p><strong>Type:</strong> ${assignedCar.type}</p>
+                </div>
+            </div>
+            <hr>
+        ` : ''}
+        <h5>Requester Information</h5>
+        <p><strong>Name:</strong> ${request.user.firstName} ${request.user.lastName}</p>
+        <p><strong>Email:</strong> ${request.user.email}</p>
+        ${request.additionalInfo ? `
+            <hr>
+            <h5>Additional Comments</h5>
+            <p>${request.additionalInfo}</p>
+        ` : ''}
+    `;
+}
+
 function setupApprovalsEvents() {
-    const approvalsTable = document.getElementById('approvalsTable');
-    const rejectionModal = new bootstrap.Modal(document.getElementById('rejectionModal'));
-    const rejectionForm = document.getElementById('rejectionForm');
-    let processingRequestId = null;
+    const container = document.getElementById('approvalsTableContainer');
+    if (!container) return;
 
-    if (approvalsTable) {
-        approvalsTable.addEventListener('click', async (e) => {
-            const target = e.target;
-            const requestId = target.closest('tr')?.dataset.requestId;
-            if (!requestId) return;
-
-            if (target.classList.contains('approve-btn')) {
-                if (confirm('Are you sure you want to approve this request?')) {
-                    try {
-                        await api.updateRequestStatus(requestId, 'approved');
-                        showAlert('Request approved successfully.', 'success');
-                        initApprovals(); // Refresh the list
-                    } catch (error) {
-                        showAlert('Failed to approve request.', 'danger');
-                    }
-                }
-            }
-
-            if (target.classList.contains('reject-btn')) {
-                processingRequestId = requestId;
-                rejectionForm.reset();
-                rejectionModal.show();
-            }
-        });
+    const modalElement = document.getElementById('approvalModal');
+    if (!modalElement) {
+        console.error('Approval modal not found!');
+        return;
     }
+    
+    let approvalModal = null; // To be initialized on first click
+    let currentRequestId = null;
+    let currentAction = null;
 
-    if (rejectionForm) {
-        rejectionForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const reason = document.getElementById('rejectionReason').value;
-            if (!processingRequestId || !reason) return;
+    container.addEventListener('click', async (e) => {
+        const target = e.target.closest('.approve-btn, .reject-btn');
+        if (!target) return;
+
+        currentRequestId = target.closest('tr').dataset.requestId;
+        currentAction = target.classList.contains('approve-btn') ? 'approved' : 'rejected';
+
+        if (!approvalModal) {
+            approvalModal = new bootstrap.Modal(modalElement);
+        }
+
+        const modalTitle = modalElement.querySelector('.modal-title');
+        const reasonTextarea = modalElement.querySelector('#approvalReason');
+        const decisionSelect = modalElement.querySelector('#decision');
+        
+        modalTitle.textContent = currentAction === 'approved' ? 'Approve Request' : 'Reject Request';
+        decisionSelect.value = currentAction;
+        reasonTextarea.required = currentAction === 'rejected';
+
+        approvalModal.show();
+    });
+
+    const submitButton = document.getElementById('submitApprovalBtn');
+    if (submitButton) {
+        submitButton.addEventListener('click', async () => {
+            const reason = document.getElementById('approvalReason').value;
+            const decision = document.getElementById('decision').value;
+
+            if (decision === 'rejected' && !reason) {
+                showAlert('A reason is required to reject a request.', 'warning');
+                return;
+            }
 
             try {
-                await api.updateRequestStatus(processingRequestId, 'rejected', reason);
-                showAlert('Request rejected successfully.', 'success');
-                rejectionModal.hide();
-                initApprovals(); // Refresh the list
+                await api.updateRequestStatus(currentRequestId, decision, reason);
+                showAlert(`Request ${decision} successfully.`, 'success');
+                if (approvalModal) {
+                    approvalModal.hide();
+                }
+                initApprovals(); // Refresh the approvals list
             } catch (error) {
-                showAlert('Failed to reject request.', 'danger', 'rejectionModalAlerts');
+                console.error(`Failed to ${decision} request:`, error);
+                showAlert(`Failed to ${decision} request.`, 'danger');
             }
         });
     }
