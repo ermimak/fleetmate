@@ -110,7 +110,7 @@ export class DatabaseSeeder {
         password: await bcrypt.hash('user123', 10),
         firstName: 'Alice',
         lastName: 'Johnson',
-        department: 'Sales',
+        department: 'Operations', // Same as authority user
         position: 'Sales Representative',
         phoneNumber: '+1234567893',
         role: UserRole.USER,
@@ -122,7 +122,7 @@ export class DatabaseSeeder {
         password: await bcrypt.hash('user123', 10),
         firstName: 'Bob',
         lastName: 'Smith',
-        department: 'Marketing',
+        department: 'Operations', // Same as authority user
         position: 'Marketing Specialist',
         phoneNumber: '+1234567894',
         role: UserRole.USER,
@@ -134,7 +134,7 @@ export class DatabaseSeeder {
         password: await bcrypt.hash('user123', 10),
         firstName: 'Charlie',
         lastName: 'Brown',
-        department: 'HR',
+        department: 'Operations', // Same as authority user
         position: 'HR Coordinator',
         phoneNumber: '+1234567895',
         role: UserRole.USER,
@@ -298,34 +298,34 @@ export class DatabaseSeeder {
     
     const requests = [
       {
-        userId: regularUsers[0].id, // Alice Johnson
+        userId: regularUsers[0].id, // Alice Johnson - Operations dept
         destination: 'Downtown Office',
         purpose: 'Client Meeting',
         departureDateTime: new Date('2025-01-20T09:00:00'),
         returnDateTime: new Date('2025-01-20T17:00:00'),
         passengerCount: 2,
         additionalNotes: 'Important client presentation',
-        status: RequestStatus.SUBMITTED,
+        status: RequestStatus.PENDING_ELIGIBILITY,
       },
       {
-        userId: regularUsers[1].id, // Bob Smith
+        userId: regularUsers[1].id, // Bob Smith - Marketing dept
         destination: 'Airport',
         purpose: 'Business Trip',
         departureDateTime: new Date('2025-01-22T06:00:00'),
         returnDateTime: new Date('2025-01-25T20:00:00'),
         passengerCount: 1,
         additionalNotes: 'Flight at 8 AM',
-        status: RequestStatus.UNDER_REVIEW,
+        status: RequestStatus.PENDING_APPROVAL,
       },
       {
-        userId: regularUsers[2].id, // Charlie Brown
+        userId: regularUsers[2].id, // Charlie Brown - HR dept
         destination: 'Training Center',
         purpose: 'Training Session',
         departureDateTime: new Date('2025-01-21T08:30:00'),
         returnDateTime: new Date('2025-01-21T16:30:00'),
         passengerCount: 3,
         additionalNotes: 'Team training event',
-        status: RequestStatus.ELIGIBLE,
+        status: RequestStatus.PENDING_ELIGIBILITY,
       },
       {
         userId: regularUsers[0].id, // Alice Johnson
@@ -365,48 +365,40 @@ export class DatabaseSeeder {
     const approver = users.find(u => u.role === UserRole.APPROVER);
 
     const approvals = [
-      // Eligibility check approvals
+      // Pending eligibility checks for authority user
       {
-        requestId: requests[1].id, // Bob's airport trip
+        requestId: requests[0].id, // Alice's client meeting - PENDING_ELIGIBILITY
         approverId: authority.id,
         type: ApprovalType.ELIGIBILITY_CHECK,
-        status: ApprovalStatus.APPROVED,
-        comments: 'Business trip approved for eligibility',
-        approvedAt: new Date('2025-01-18T10:00:00'),
+        status: ApprovalStatus.PENDING,
+        comments: null,
+        approvedAt: null,
       },
       {
-        requestId: requests[2].id, // Charlie's training
+        requestId: requests[2].id, // Charlie's training - PENDING_ELIGIBILITY
         approverId: authority.id,
         type: ApprovalType.ELIGIBILITY_CHECK,
-        status: ApprovalStatus.APPROVED,
-        comments: 'Training session approved',
-        approvedAt: new Date('2025-01-18T11:00:00'),
+        status: ApprovalStatus.PENDING,
+        comments: null,
+        approvedAt: null,
       },
+      // Approved requests (for admin final approval)
       {
-        requestId: requests[4].id, // Bob's vendor meeting
-        approverId: authority.id,
-        type: ApprovalType.ELIGIBILITY_CHECK,
-        status: ApprovalStatus.REJECTED,
-        comments: 'Public transport recommended',
-        approvedAt: new Date('2025-01-18T12:00:00'),
-      },
-      // Final approvals
-      {
-        requestId: requests[3].id, // Alice's conference
+        requestId: requests[3].id, // Alice's conference - APPROVED
         approverId: approver.id,
         type: ApprovalType.FINAL_APPROVAL,
         status: ApprovalStatus.APPROVED,
         comments: 'Conference attendance approved',
         approvedAt: new Date('2025-01-18T14:00:00'),
       },
-      // Pending approvals
+      // Rejected request
       {
-        requestId: requests[0].id, // Alice's client meeting
+        requestId: requests[4].id, // Bob's vendor meeting - REJECTED
         approverId: authority.id,
         type: ApprovalType.ELIGIBILITY_CHECK,
-        status: ApprovalStatus.PENDING,
-        comments: null,
-        approvedAt: null,
+        status: ApprovalStatus.REJECTED,
+        comments: 'Public transport recommended',
+        approvedAt: new Date('2025-01-18T12:00:00'),
       },
     ];
 

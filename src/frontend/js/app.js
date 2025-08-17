@@ -320,6 +320,26 @@ class ApiService {
         return await this.request('/requests/overdue');
     }
 
+    async getAllRequests(filters = {}) {
+        const params = new URLSearchParams(filters);
+        return await this.request(`/requests?${params}`);
+    }
+
+    async getPendingEligibilityRequests() {
+        return await this.request('/requests/pending-eligibility');
+    }
+
+    async getPendingFinalApprovalRequests() {
+        return await this.request('/requests/pending-final-approval');
+    }
+
+    async assignCarToRequest(requestId, carId, driverId = null) {
+        return await this.request(`/requests/${requestId}/assign-car`, {
+            method: 'PATCH',
+            body: { carId, driverId }
+        });
+    }
+
     // Cars API
     async getCars(filters = {}) {
         const params = new URLSearchParams(filters);
@@ -795,9 +815,9 @@ async function initNewRequestPage() {
                 destination: document.getElementById('destination').value,
                 departureDateTime: new Date(departureValue).toISOString(),
                 returnDateTime: new Date(returnValue).toISOString(),
-                passengers: parseInt(document.getElementById('passengers').value, 10),
-                additionalInfo: document.getElementById('comments').value,
-                priority: 'routine', // Default priority
+                passengerCount: parseInt(document.getElementById('passengers').value, 10),
+                additionalNotes: document.getElementById('comments').value,
+                priority: 'medium', // Default priority
             };
 
             await api.createRequest(requestData);
@@ -831,15 +851,30 @@ function setupManageRequestsEvents() {
     const loadManageRequestsTable = async () => {
         requestsTableContainer.innerHTML = `<div class="text-center text-muted"><div class="loading"></div> Loading requests...</div>`;
         try {
-            const user = api.getCurrentUser();
+            const currentUser = api.getCurrentUser();
+            console.log('Current user in manage requests:', currentUser);
+            
             let requests;
-            if (user.role === 'admin') {
-                requests = await api.request('/requests'); // Fetch all requests for admin
+            if (currentUser.role === 'admin') {
+                // Admin sees requests pending final approval (after authority eligibility check)
+                console.log('Loading pending final approval requests for admin');
+                requests = await api.getPendingFinalApprovalRequests();
+            } else if (currentUser.role === 'authority') {
+                // Authority sees requests pending eligibility check from their department
+                console.log('Loading pending eligibility requests for authority');
+                requests = await api.getPendingEligibilityRequests();
             } else {
-                requests = await api.request('/requests/pending-eligibility'); // Fetch department-specific for authority
+                // Other roles see their pending approvals
+                console.log('Loading pending approvals for other roles');
+                requests = await api.getPendingApprovals();
             }
+            
+            console.log('Loaded requests:', requests);
             if (requests.length === 0) {
-                requestsTableContainer.innerHTML = `<div class="text-center text-muted">No requests are currently pending eligibility review.</div>`;
+                const message = currentUser.role === 'admin' ? 'No requests pending final approval.' : 
+                               currentUser.role === 'authority' ? 'No requests pending eligibility review.' : 
+                               'No pending approvals.';
+                requestsTableContainer.innerHTML = `<div class="text-center text-muted">${message}</div>`;
                 return;
             }
 
@@ -852,25 +887,35 @@ function setupManageRequestsEvents() {
                         <th>Purpose</th>
                         <th>Destination</th>
                         <th>Departure</th>
+                        <th>Passengers</th>
                         <th>Priority</th>
                         <th>Status</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody>
-                    ${requests.map(req => `
+                    ${requests.map(req => {
+                        const actions = [];
+                        if (currentUser.role === 'authority' && req.status === 'PENDING_ELIGIBILITY') {
+                            actions.push(`<button class="btn btn-primary btn-sm process-btn" data-approval-id="${req.approvals?.[0]?.id || req.id}">Process Eligibility</button>`);
+                        } else if (currentUser.role === 'admin' && req.status === 'PENDING_APPROVAL') {
+                            actions.push(`<button class="btn btn-success btn-sm approve-btn" data-request-id="${req.id}">Approve</button>`);
+                            actions.push(`<button class="btn btn-danger btn-sm reject-btn" data-request-id="${req.id}">Reject</button>`);
+                        } else if (currentUser.role === 'admin' && req.status === 'approved') {
+                            actions.push(`<button class="btn btn-info btn-sm assign-car-btn" data-request-id="${req.id}">Assign Vehicle</button>`);
+                        }
+                        return `
                         <tr>
-                            <td>${req.user.firstName} ${req.user.lastName}</td>
+                            <td>${req.user?.firstName || 'N/A'} ${req.user?.lastName || ''}</td>
                             <td>${escapeHTML(req.purpose)}</td>
                             <td>${escapeHTML(req.destination)}</td>
                             <td>${new Date(req.departureDateTime).toLocaleString()}</td>
+                            <td>${req.passengerCount || req.passengers || 'N/A'}</td>
                             <td><span class="badge bg-secondary">${req.priority}</span></td>
                             <td><span class="badge bg-warning text-dark">${req.status.replace(/_/g, ' ')}</span></td>
-                            <td>
-                                <button class="btn btn-primary btn-sm process-btn" data-approval-id="${req.approvals[0].id}">Process</button>
-                            </td>
-                        </tr>
-                    `).join('')}
+                            <td>${actions.join(' ')}</td>
+                        </tr>`;
+                    }).join('')}
                 </tbody>
             `;
             requestsTableContainer.innerHTML = '';
@@ -939,7 +984,110 @@ function setupManageRequestsEvents() {
         }
     });
 
+    // Add event handlers for new buttons
+    requestsTableContainer.addEventListener('click', async (e) => {
+        const target = e.target;
+        
+        if (target.classList.contains('approve-btn')) {
+            const requestId = target.dataset.requestId;
+            if (confirm('Are you sure you want to approve this request?')) {
+                try {
+                    await api.updateRequestStatus(requestId, 'approved');
+                    showToast('Request approved successfully!', 'success');
+                    loadManageRequestsTable();
+                } catch (error) {
+                    showAlert('Failed to approve request: ' + error.message, 'danger');
+                }
+            }
+        } else if (target.classList.contains('reject-btn')) {
+            const requestId = target.dataset.requestId;
+            const reason = prompt('Please provide a reason for rejection:');
+            if (reason) {
+                try {
+                    await api.updateRequestStatus(requestId, 'rejected', reason);
+                    showToast('Request rejected successfully!', 'success');
+                    loadManageRequestsTable();
+                } catch (error) {
+                    showAlert('Failed to reject request: ' + error.message, 'danger');
+                }
+            }
+        } else if (target.classList.contains('assign-car-btn')) {
+            const requestId = target.dataset.requestId;
+            await showVehicleAssignmentModal(requestId);
+        }
+    });
+
     loadManageRequestsTable();
+}
+
+// Vehicle Assignment Modal Function
+async function showVehicleAssignmentModal(requestId) {
+    try {
+        const [request, availableCars] = await Promise.all([
+            api.getRequestById(requestId),
+            api.getAvailableCars()
+        ]);
+
+        const modalHtml = `
+            <div id="vehicleAssignmentModal" class="modal-overlay">
+                <div class="modal">
+                    <div class="modal-header">
+                        <h2 class="modal-title">Assign Vehicle</h2>
+                        <button class="modal-close" onclick="document.getElementById('vehicleAssignmentModal').remove()">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <strong>Request Details:</strong><br>
+                            Purpose: ${request.purpose}<br>
+                            Destination: ${request.destination}<br>
+                            Passengers: ${request.passengerCount}<br>
+                            Departure: ${new Date(request.departureDateTime).toLocaleString()}
+                        </div>
+                        <div class="form-group">
+                            <label for="assignCarSelect">Select Vehicle:</label>
+                            <select id="assignCarSelect" class="form-control" required>
+                                <option value="">Choose a vehicle...</option>
+                                ${availableCars.map(car => `
+                                    <option value="${car.id}">
+                                        ${car.make} ${car.model} (${car.plateNumber}) - Capacity: ${car.capacity}
+                                    </option>
+                                `).join('')}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-outline" onclick="document.getElementById('vehicleAssignmentModal').remove()">Cancel</button>
+                        <button class="btn btn-primary" onclick="assignVehicleToRequest('${requestId}')">Assign Vehicle</button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+    } catch (error) {
+        showAlert('Failed to load vehicle assignment modal: ' + error.message, 'danger');
+    }
+}
+
+// Assign vehicle function
+async function assignVehicleToRequest(requestId) {
+    const carId = document.getElementById('assignCarSelect').value;
+    if (!carId) {
+        showAlert('Please select a vehicle', 'warning');
+        return;
+    }
+
+    try {
+        await api.assignCarToRequest(requestId, carId);
+        showToast('Vehicle assigned successfully!', 'success');
+        document.getElementById('vehicleAssignmentModal').remove();
+        // Reload the manage requests table if it exists
+        if (typeof loadManageRequestsTable === 'function') {
+            loadManageRequestsTable();
+        }
+    } catch (error) {
+        showAlert('Failed to assign vehicle: ' + error.message, 'danger');
+    }
 }
 
 
@@ -1265,10 +1413,10 @@ function setupFleetManagementEvents() {
                 document.getElementById('make').value = vehicle.make;
                 document.getElementById('model').value = vehicle.model;
                 document.getElementById('year').value = vehicle.year;
-                document.getElementById('licensePlate').value = vehicle.licensePlate;
+                document.getElementById('plateNumber').value = vehicle.plateNumber;
+                document.getElementById('color').value = vehicle.color;
                 document.getElementById('type').value = vehicle.type;
                 document.getElementById('capacity').value = vehicle.capacity;
-                document.getElementById('fuelType').value = vehicle.fuelType;
                 document.getElementById('mileage').value = vehicle.mileage || '';
                 document.getElementById('vehicleStatus').value = vehicle.status;
                 document.getElementById('notes').value = vehicle.notes || '';
@@ -1287,10 +1435,10 @@ function setupFleetManagementEvents() {
             make: document.getElementById('make').value,
             model: document.getElementById('model').value,
             year: parseInt(document.getElementById('year').value, 10),
-            licensePlate: document.getElementById('licensePlate').value,
+            plateNumber: document.getElementById('plateNumber').value,
+            color: document.getElementById('color').value,
             type: document.getElementById('type').value,
             capacity: parseInt(document.getElementById('capacity').value, 10),
-            fuelType: document.getElementById('fuelType').value,
             mileage: parseInt(document.getElementById('mileage').value, 10) || 0,
             status: document.getElementById('vehicleStatus').value,
             notes: document.getElementById('notes').value,
@@ -1551,8 +1699,8 @@ async function loadVehiclesTable() {
                     <tr>
                         <th>Vehicle</th>
                         <th>Year</th>
-                        <th>VIN</th>
-                        <th>License Plate</th>
+                        <th>Color</th>
+                        <th>Plate Number</th>
                         <th>Type</th>
                         <th>Status</th>
                         <th>Actions</th>
@@ -1563,8 +1711,8 @@ async function loadVehiclesTable() {
                         <tr data-vehicle-id="${vehicle.id}">
                             <td>${vehicle.make} ${vehicle.model}</td>
                             <td>${vehicle.year}</td>
-                            <td>${vehicle.vin}</td>
-                            <td>${vehicle.licensePlate}</td>
+                            <td>${vehicle.color}</td>
+                            <td>${vehicle.plateNumber}</td>
                             <td>${vehicle.type}</td>
                             <td><span class="badge bg-${vehicle.status === 'available' ? 'success' : 'secondary'}">${vehicle.status}</span></td>
                             <td>
