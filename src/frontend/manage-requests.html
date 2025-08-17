@@ -92,64 +92,7 @@
                             </div>
                         </div>
 
-                        <!-- Request Stats -->
-                        <div class="stats-grid mb-4">
-                            <div class="stat-card">
-                                <div class="stat-value" id="totalRequests">-</div>
-                                <div class="stat-label">Total Requests</div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-value" id="pendingRequests">-</div>
-                                <div class="stat-label">Pending</div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-value" id="approvedRequests">-</div>
-                                <div class="stat-label">Approved</div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-value" id="completedRequests">-</div>
-                                <div class="stat-label">Completed</div>
-                            </div>
-                        </div>
 
-                        <!-- Filters -->
-                        <div class="card mb-4">
-                            <div class="card-body">
-                                <div class="d-flex gap-3 align-center flex-wrap">
-                                    <div class="form-group mb-0">
-                                        <select class="form-control form-select" id="statusFilter">
-                                            <option value="">All Status</option>
-                                            <option value="pending">Pending</option>
-                                            <option value="approved">Approved</option>
-                                            <option value="rejected">Rejected</option>
-                                            <option value="car_assigned">Car Assigned</option>
-                                            <option value="in_progress">In Progress</option>
-                                            <option value="completed">Completed</option>
-                                            <option value="cancelled">Cancelled</option>
-                                        </select>
-                                    </div>
-                                    <div class="form-group mb-0">
-                                        <select class="form-control form-select" id="priorityFilter">
-                                            <option value="">All Priority</option>
-                                            <option value="low">Low</option>
-                                            <option value="medium">Medium</option>
-                                            <option value="high">High</option>
-                                            <option value="urgent">Urgent</option>
-                                        </select>
-                                    </div>
-                                    <div class="form-group mb-0">
-                                        <input type="date" class="form-control" id="startDateFilter" placeholder="Start Date">
-                                    </div>
-                                    <div class="form-group mb-0">
-                                        <input type="date" class="form-control" id="endDateFilter" placeholder="End Date">
-                                    </div>
-                                    <div class="form-group mb-0">
-                                        <input type="text" class="form-control" id="searchRequests" placeholder="Search requests...">
-                                    </div>
-                                    <button class="btn btn-outline" id="clearFilters">Clear</button>
-                                </div>
-                            </div>
-                        </div>
 
                         <!-- Requests Table -->
                         <div class="card">
@@ -189,36 +132,35 @@
         </div>
     </div>
 
-    <!-- Status Update Modal -->
-    <div id="statusModal" class="modal-overlay d-none">
+    <!-- Eligibility Decision Modal -->
+    <div id="eligibilityModal" class="modal-overlay d-none">
         <div class="modal">
             <div class="modal-header">
-                <h2 class="modal-title">Update Request Status</h2>
-                <button class="modal-close" id="closeStatusModal">&times;</button>
+                <h2 class="modal-title">Process Eligibility</h2>
+                <button class="modal-close" id="closeEligibilityModal">&times;</button>
             </div>
             <div class="modal-body">
-                <form id="statusForm">
+                <form id="eligibilityForm">
                     <div class="form-group">
-                        <label class="form-label" for="newStatus">New Status *</label>
-                        <select class="form-control form-select" id="newStatus" required>
-                            <option value="">Select Status</option>
-                            <option value="approved">Approve</option>
-                            <option value="rejected">Reject</option>
-                            <option value="cancelled">Cancel</option>
+                        <label class="form-label" for="eligibilityDecision">Decision *</label>
+                        <select class="form-control form-select" id="eligibilityDecision" required>
+                            <option value="">Select Decision</option>
+                            <option value="true">Eligible</option>
+                            <option value="false">Ineligible</option>
                         </select>
                     </div>
                     <div class="form-group">
-                        <label class="form-label" for="statusReason">Reason</label>
-                        <textarea class="form-control" id="statusReason" rows="3" placeholder="Optional reason for status change..."></textarea>
+                        <label class="form-label" for="eligibilityComments">Comments</label>
+                        <textarea class="form-control" id="eligibilityComments" rows="3" placeholder="Comments are required if marking as ineligible..."></textarea>
                     </div>
-                    <div id="statusError" class="alert alert-danger d-none"></div>
+                    <div id="eligibilityError" class="alert alert-danger d-none"></div>
                 </form>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-outline" id="cancelStatusBtn">Cancel</button>
-                <button type="submit" class="btn btn-primary" id="updateStatusBtn" form="statusForm">
-                    <span class="loading d-none" id="statusLoading"></span>
-                    Update Status
+                <button type="button" class="btn btn-outline" id="cancelEligibilityBtn">Cancel</button>
+                <button type="submit" class="btn btn-primary" id="submitEligibilityBtn" form="eligibilityForm">
+                    <span class="loading d-none" id="eligibilityLoading"></span>
+                    Submit Decision
                 </button>
             </div>
         </div>

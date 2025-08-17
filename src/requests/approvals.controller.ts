@@ -63,4 +63,21 @@ export class ApprovalsController {
   reject(@Param('id') id: string, @Body('comments') comments: string) {
     return this.approvalsService.reject(id, comments);
   }
+
+  @Patch(':id/eligibility')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.AUTHORITY)
+  processEligibilityDecision(
+    @Param('id') id: string,
+    @Request() req,
+    @Body('isEligible') isEligible: boolean,
+    @Body('comments') comments?: string,
+  ) {
+    return this.approvalsService.processEligibilityDecision(
+      id,
+      req.user.userId,
+      isEligible,
+      comments,
+    );
+  }
 }

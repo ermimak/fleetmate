@@ -52,6 +52,55 @@ function formatDate(dateString) {
     });
 }
 
+function showToast(message, type = 'success') {
+    // Simple toast implementation
+    const toast = document.createElement('div');
+    toast.className = `alert alert-${type} position-fixed`;
+    toast.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    
+    setTimeout(() => {
+        toast.remove();
+    }, 3000);
+}
+
+function showError(element, message) {
+    if (typeof element === 'string') {
+        element = document.getElementById(element);
+    }
+    if (!element) return;
+    
+    element.textContent = message;
+    element.classList.remove('d-none');
+}
+
+function hideError(element) {
+    if (typeof element === 'string') {
+        element = document.getElementById(element);
+    }
+    if (!element) return;
+    
+    element.classList.add('d-none');
+}
+
+function escapeHTML(str) {
+    if (str === null || str === undefined) {
+        return '';
+    }
+    return str.toString().replace(/[&<>"']/g, function(match) {
+        return {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        }[match];
+    });
+}
+
+
+
 function getStatusBadge(status) {
     const statusMap = {
         'pending': 'badge-warning',
@@ -501,9 +550,21 @@ async function initMyRequests() {
 }
 
 async function initApprovals() {
+    const user = api.getCurrentUser();
+
     try {
-        // Load pending approvals
-        const approvals = await api.getPendingApprovals();
+        let approvals;
+
+        if (user.role === 'admin') {
+            // Admins see all requests pending final approval
+            approvals = await api.request('/requests/pending-final-approval');
+        } else if (user.role === 'authority') {
+            // Authorities see requests pending eligibility from their department
+            approvals = await api.request('/requests/pending-eligibility');
+        } else {
+            // Approvers see their assigned pending approvals
+            approvals = await api.request('/approvals/my-pending-approvals');
+        }
         
         // Update stats
         updateStatsCard('totalPendingApprovals', approvals.length);
@@ -522,6 +583,8 @@ async function initApprovals() {
         showAlert('Error loading pending approvals', 'danger');
     }
 }
+
+
 
 // --- Utility Functions for Page Initialization --- //
 function updateStatsCard(elementId, value) {
@@ -619,21 +682,12 @@ function getRedirectPathForRole(role) {
 async function initProtectedPage(currentPage, user) {
     // This function assumes the user is already authenticated and their data is loaded.
     try {
-        
-        // Check if user has access to this page
-                const redirectPath = getRedirectPathForRole(user.role);
         if (!hasPageAccess(currentPage, user.role)) {
             console.warn(`User with role '${user.role}' does not have access to page '${currentPage}'. Redirecting.`);
-            // Safeguard: If the redirect path is the current page, send to a default safe page.
-            if (window.location.pathname === redirectPath) {
-                console.error("Redirect loop detected! Redirecting to /my-requests.html as a fallback.");
-                window.location.replace('/my-requests.html');
-            } else {
-                window.location.replace(redirectPath);
-            }
+            window.location.replace(getRedirectPathForRole(user.role));
             return;
         }
-        
+
         updateNavigation();
         setupEventListeners();
 
@@ -644,10 +698,9 @@ async function initProtectedPage(currentPage, user) {
             case 'fleet-management': await initFleetManagement(); break;
             case 'my-requests': await initMyRequests(); break;
             case 'approvals': await initApprovals(); break;
-            case 'manage-requests': await initManageRequests(); break;
+            case 'manage-requests': await setupManageRequestsEvents(); break;
             case 'reports': await initReports(); break;
             case 'new-request': await initNewRequestPage(); break;
-            // No default case needed, non-matching pages will just have nav/events setup.
         }
     } catch (error) {
         console.error(`Failed to initialize content for page ${currentPage}:`, error);
@@ -661,44 +714,25 @@ async function initializeApp() {
     const token = api.token;
 
     if (token) {
-        // A token exists. Validate it by fetching user data.
-        console.log('Token found:', token.substring(0, 20) + '...');
-        console.log('Current page:', currentPage);
         try {
             const user = await api.getMe();
-            console.log('User data received:', user);
             state.currentUser = user;
-            localStorage.setItem(USER_KEY, JSON.stringify(user)); // Refresh user data
+            localStorage.setItem(USER_KEY, JSON.stringify(user));
 
-            // User is authenticated. Check where they are.
             if (currentPage === 'login' || currentPage === 'index') {
-                // Redirect logged-in users away from the login page.
                 const redirectPath = getRedirectPathForRole(user.role);
-                console.log('Redirecting logged-in user to:', redirectPath);
                 window.location.replace(redirectPath);
                 return;
             }
             
-            // Check if user has access to current page
-            console.log('Checking page access for role:', user.role, 'on page:', currentPage);
-            
-                        // Initialize the protected page they're on.
             await initProtectedPage(currentPage, user);
 
         } catch (error) {
-            // Token is invalid or expired. Force logout.
-            console.error('Authentication check failed, forcing logout.', error);
-            console.error('Error details:', error.message);
-            console.error('Response status:', error.status);
-            
-            // Only logout if it's actually an auth error
             if (error.message && (error.message.includes('401') || error.message.includes('Unauthorized'))) {
-                api.logout(); // This clears tokens and redirects to login.
+                api.logout();
             } else {
-                // Network or other error - try to continue with cached user data
                 const cachedUser = api.getCurrentUser();
                 if (cachedUser) {
-                    console.log('Using cached user data:', cachedUser);
                     state.currentUser = cachedUser;
                     await initProtectedPage(currentPage, cachedUser);
                 } else {
@@ -707,13 +741,10 @@ async function initializeApp() {
             }
         }
     } else {
-        // No token. User is not logged in.
         if (currentPage !== 'login' && currentPage !== 'index') {
-            // If on a protected page, redirect to login.
             window.location.replace('/login.html');
             return;
         }
-        // Otherwise, we're on the login page. Set up the form.
         const loginForm = document.getElementById('loginForm');
         if (loginForm) {
             loginForm.addEventListener('submit', handleLogin);
@@ -733,13 +764,9 @@ async function handleLogin(e) {
     submitButton.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Signing In...';
 
     try {
-        console.log('Attempting login for:', form.email.value);
         const user = await api.login({ email: form.email.value, password: form.password.value });
-        console.log('Login successful, user:', user);
-        console.log('Redirecting to:', getRedirectPathForRole(user.role));
         window.location.replace(getRedirectPathForRole(user.role));
     } catch (error) {
-        console.error('Login failed:', error);
         errorMessage.textContent = error.message || 'An unknown error occurred.';
         submitButton.disabled = false;
         submitButton.textContent = 'Sign In';
@@ -749,232 +776,173 @@ async function handleLogin(e) {
 // --- Initialize Application on DOM Load --- //
 document.addEventListener('DOMContentLoaded', initializeApp);
 
-// Placeholder functions for pages not yet implemented
-async function initManageRequests() {
-    try {
-        showLoading('requestsTable');
-        const requests = await api.getAllRequests();
-        
-        const stats = calculateRequestStats(requests);
-        updateStatsCard('totalRequests', stats.total);
-        updateStatsCard('pendingRequests', stats.pending);
-        updateStatsCard('approvedRequests', stats.approved);
-        updateStatsCard('activeTrips', requests.filter(r => r.status === 'active').length);
+async function initNewRequestPage() {
+    const newRequestForm = document.getElementById('requestForm');
+    if (!newRequestForm) return;
 
-        await loadManageRequestsTable(requests);
-        setupManageRequestsEvents();
+    newRequestForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const submitBtn = newRequestForm.querySelector('button[type="submit"]');
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Submitting...';
 
-    } catch (error) {
-        console.error('Error initializing manage requests:', error);
-        showAlert('Error loading request data', 'danger');
-    } finally {
-        hideLoading('requestsTable');
-    }
-}
+        try {
+            const departureValue = document.getElementById('departureDate').value;
+            const returnValue = document.getElementById('returnDate').value;
 
-async function loadManageRequestsTable(requests) {
-    const container = document.getElementById('requestsTableContainer');
-    if (!container) return;
+            const requestData = {
+                purpose: document.getElementById('purpose').value,
+                destination: document.getElementById('destination').value,
+                departureDateTime: new Date(departureValue).toISOString(),
+                returnDateTime: new Date(returnValue).toISOString(),
+                passengers: parseInt(document.getElementById('passengers').value, 10),
+                additionalInfo: document.getElementById('comments').value,
+                priority: 'routine', // Default priority
+            };
 
-    if (requests.length === 0) {
-        container.innerHTML = '<p class="text-center text-muted">No requests found.</p>';
-        return;
-    }
+            await api.createRequest(requestData);
 
-    const tableHtml = `
-        <table class="table table-hover" id="requestsTable">
-            <thead>
-                <tr>
-                    <th>Purpose</th>
-                    <th>User</th>
-                    <th>Start Time</th>
-                    <th>End Time</th>
-                    <th>Passengers</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                ${requests.map(request => `
-                    <tr data-request-id="${request.id}">
-                        <td>${request.purpose}</td>
-                        <td>${request.user.firstName} ${request.user.lastName}</td>
-                        <td>${formatDate(request.startTime)}</td>
-                        <td>${formatDate(request.endTime)}</td>
-                        <td>${request.passengerCount}</td>
-                        <td>${getStatusBadge(request.status)}</td>
-                        <td>
-                            <button class="btn btn-sm btn-primary view-request-btn" data-id="${request.id}">Details</button>
-                        </td>
-                    </tr>
-                `).join('')}
-            </tbody>
-        </table>
-    `;
+            showAlert('Request submitted successfully!', 'success');
+            setTimeout(() => window.location.href = '/my-requests.html', 1500);
 
-    container.innerHTML = tableHtml;
+        } catch (error) {
+            console.error('Failed to submit request:', error);
+            showAlert(error.message || 'Failed to submit request. Please check the form and try again.', 'danger');
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = 'Submit Request';
+        }
+    });
 }
 
 function setupManageRequestsEvents() {
-    const container = document.getElementById('requestsTableContainer');
-    if (!container) return;
+    const requestsTableContainer = document.getElementById('requestsTableContainer');
+    const eligibilityModal = document.getElementById('eligibilityModal');
+    const closeEligibilityModalBtn = document.getElementById('closeEligibilityModal');
+    const cancelEligibilityBtn = document.getElementById('cancelEligibilityBtn');
+    const eligibilityForm = document.getElementById('eligibilityForm');
+    const eligibilityError = document.getElementById('eligibilityError');
+    let currentApprovalId = null;
 
-    // --- Modal Elements ---
-    const requestModal = document.getElementById('requestModal');
-    const statusModal = document.getElementById('statusModal');
-    const assignModal = document.getElementById('assignModal');
-    const tripModal = document.getElementById('tripModal');
-
-    if (!requestModal || !statusModal || !assignModal || !tripModal) {
-        console.error('One or more modals for Manage Requests page are missing!');
+    if (!requestsTableContainer || !eligibilityModal) {
+        console.error('Required elements for Manage Requests page are missing.');
         return;
     }
 
-    // --- Modal Instances ---
-    const bsRequestModal = new bootstrap.Modal(requestModal);
-    const bsStatusModal = new bootstrap.Modal(statusModal);
-    const bsAssignModal = new bootstrap.Modal(assignModal);
-    const bsTripModal = new bootstrap.Modal(tripModal);
-
-    let currentRequestId = null;
-
-    // --- Event Listeners for table actions ---
-    container.addEventListener('click', async (e) => {
-        const target = e.target.closest('.view-request-btn, .update-status-btn, .assign-vehicle-btn, .manage-trip-btn');
-        if (!target) return;
-
-        const requestId = target.closest('tr')?.dataset.requestId;
-        if (!requestId) return;
-        currentRequestId = requestId;
-
-        if (target.classList.contains('view-request-btn')) {
-            const detailsContainer = document.getElementById('requestDetails');
-            detailsContainer.innerHTML = '<div class="text-center"><div class="loading"></div></div>';
-            bsRequestModal.show();
-            try {
-                const request = await api.getRequestById(requestId);
-                detailsContainer.innerHTML = `
-                    <div class="row">
-                        <div class="col-md-6">
-                            <p><strong>Requester:</strong> ${request.user.firstName} ${request.user.lastName}</p>
-                            <p><strong>Destination:</strong> ${request.destination}</p>
-                            <p><strong>Purpose:</strong> ${request.purpose}</p>
-                            <p><strong>Passengers:</strong> ${request.passengerCount}</p>
-                        </div>
-                        <div class="col-md-6">
-                            <p><strong>Start Time:</strong> ${formatDate(request.startTime)}</p>
-                            <p><strong>End Time:</strong> ${formatDate(request.endTime)}</p>
-                            <p><strong>Status:</strong> ${getStatusBadge(request.status)}</p>
-                            <p><strong>Priority:</strong> ${request.priority || 'N/A'}</p>
-                        </div>
-                    </div>
-                    <hr>
-                    <p><strong>Assigned Vehicle:</strong> ${request.car ? `${request.car.make} ${request.car.model}` : 'Not Assigned'}</p>
-                    <p><strong>Assigned Driver:</strong> ${request.driver ? `${request.driver.firstName} ${request.driver.lastName}` : 'Not Assigned'}</p>
-                    <hr>
-                    <p><strong>Additional Info:</strong></p>
-                    <p>${request.additionalInfo || 'None'}</p>
-                `;
-            } catch (error) {
-                detailsContainer.innerHTML = '<p class="text-danger">Failed to load request details.</p>';
+    const loadManageRequestsTable = async () => {
+        requestsTableContainer.innerHTML = `<div class="text-center text-muted"><div class="loading"></div> Loading requests...</div>`;
+        try {
+            const user = api.getCurrentUser();
+            let requests;
+            if (user.role === 'admin') {
+                requests = await api.request('/requests'); // Fetch all requests for admin
+            } else {
+                requests = await api.request('/requests/pending-eligibility'); // Fetch department-specific for authority
             }
-        } else if (target.classList.contains('update-status-btn')) {
-            document.getElementById('statusForm').reset();
-            bsStatusModal.show();
-        } else if (target.classList.contains('assign-vehicle-btn')) {
-            // TODO: Load vehicles and drivers into selects
-            bsAssignModal.show();
-        } else if (target.classList.contains('manage-trip-btn')) {
-            // TODO: Logic to show start or complete trip section
-            bsTripModal.show();
+            if (requests.length === 0) {
+                requestsTableContainer.innerHTML = `<div class="text-center text-muted">No requests are currently pending eligibility review.</div>`;
+                return;
+            }
+
+            const table = document.createElement('table');
+            table.className = 'table';
+            table.innerHTML = `
+                <thead>
+                    <tr>
+                        <th>Requester</th>
+                        <th>Purpose</th>
+                        <th>Destination</th>
+                        <th>Departure</th>
+                        <th>Priority</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${requests.map(req => `
+                        <tr>
+                            <td>${req.user.firstName} ${req.user.lastName}</td>
+                            <td>${escapeHTML(req.purpose)}</td>
+                            <td>${escapeHTML(req.destination)}</td>
+                            <td>${new Date(req.departureDateTime).toLocaleString()}</td>
+                            <td><span class="badge bg-secondary">${req.priority}</span></td>
+                            <td><span class="badge bg-warning text-dark">${req.status.replace(/_/g, ' ')}</span></td>
+                            <td>
+                                <button class="btn btn-primary btn-sm process-btn" data-approval-id="${req.approvals[0].id}">Process</button>
+                            </td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            `;
+            requestsTableContainer.innerHTML = '';
+            requestsTableContainer.appendChild(table);
+        } catch (error) {
+            console.error('Failed to load requests for management:', error);
+            requestsTableContainer.innerHTML = `<div class="alert alert-danger">Failed to load requests. Please try again.</div>`;
+        }
+    };
+
+    requestsTableContainer.addEventListener('click', (e) => {
+        if (e.target.classList.contains('process-btn')) {
+            currentApprovalId = e.target.dataset.approvalId;
+            eligibilityModal.classList.remove('d-none');
         }
     });
 
-    // --- Event listener for status update form ---
-    document.getElementById('statusForm')?.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const newStatus = document.getElementById('newStatus').value;
-        const reason = document.getElementById('statusReason').value;
-        if (!newStatus || !currentRequestId) return;
-
-        try {
-            await api.updateRequestStatus(currentRequestId, newStatus, reason);
-            showAlert('Status updated successfully!', 'success');
-            bsStatusModal.hide();
-            loadManageRequestsTable(); // Refresh table
-        } catch (error) {
-            showAlert(error.message || 'Failed to update status.', 'danger', 'statusError');
-        }
+    // Close modal handlers
+    closeEligibilityModalBtn.addEventListener('click', () => {
+        eligibilityModal.classList.add('d-none');
     });
     
-    // --- Filter and Refresh Listeners ---
-    document.getElementById('refreshRequestsBtn')?.addEventListener('click', loadManageRequestsTable);
-    document.getElementById('statusFilter')?.addEventListener('change', loadManageRequestsTable);
-    document.getElementById('priorityFilter')?.addEventListener('change', loadManageRequestsTable);
-    document.getElementById('searchRequests')?.addEventListener('input', (e) => {
-        // Basic debouncing
-        setTimeout(() => {
-            if(document.getElementById('searchRequests').value === e.target.value) {
-                loadManageRequestsTable();
-            }
-        }, 500);
+    cancelEligibilityBtn.addEventListener('click', () => {
+        eligibilityModal.classList.add('d-none');
     });
-    document.getElementById('clearFilters')?.addEventListener('click', () => {
-        document.getElementById('statusFilter').value = '';
-        document.getElementById('priorityFilter').value = '';
-        document.getElementById('searchRequests').value = '';
-        loadManageRequestsTable();
-    });
-}
-
-async function initNewRequestPage() {
-    const form = document.getElementById('requestForm');
-    if (!form) return;
-
-    const departureDateEl = document.getElementById('departureDate');
-    const returnDateEl = document.getElementById('returnDate');
-
-    // Set minimum date/time to now
-    const now = new Date();
-    const timezoneOffset = now.getTimezoneOffset() * 60000;
-    const localISOTime = new Date(now - timezoneOffset).toISOString().slice(0, 16);
-
-    departureDateEl.min = localISOTime;
-    returnDateEl.min = localISOTime;
-    departureDateEl.value = localISOTime;
-
-    departureDateEl.addEventListener('change', (e) => {
-        returnDateEl.min = e.target.value;
-        if (returnDateEl.value < e.target.value) {
-            returnDateEl.value = e.target.value;
+    
+    // Close modal when clicking outside
+    eligibilityModal.addEventListener('click', (e) => {
+        if (e.target === eligibilityModal) {
+            eligibilityModal.classList.add('d-none');
         }
     });
 
-    form.addEventListener('submit', async (e) => {
+    eligibilityForm.addEventListener('submit', async (e) => {
         e.preventDefault();
-        const requestData = {
-            destination: document.getElementById('destination').value,
-            purpose: document.getElementById('purpose').value,
-            startTime: document.getElementById('departureDate').value,
-            endTime: document.getElementById('returnDate').value,
-            passengerCount: parseInt(document.getElementById('passengers').value, 10) || 1,
-            additionalInfo: document.getElementById('comments').value,
-        };
+        const decision = document.getElementById('eligibilityDecision').value;
+        const comments = document.getElementById('eligibilityComments').value;
 
-        if (new Date(requestData.endTime) <= new Date(requestData.startTime)) {
-            showAlert('Return date must be after departure date.', 'danger');
+        if (decision === 'false' && !comments.trim()) {
+            showError(eligibilityError, 'Comments are required when marking a request as ineligible.');
             return;
         }
 
+        const submitBtn = document.getElementById('submitEligibilityBtn');
+        showLoading('submitEligibilityBtn');
+        if(eligibilityError) hideError(eligibilityError);
+
         try {
-            await api.createRequest(requestData);
-            window.location.href = '/my-requests.html';
+            await api.request(`/approvals/${currentApprovalId}/eligibility`, {
+                method: 'PATCH',
+                body: {
+                    isEligible: decision === 'true',
+                    comments
+                }
+            });
+            eligibilityModal.classList.add('d-none');
+            await loadManageRequestsTable();
+            showToast('Decision submitted successfully.');
         } catch (error) {
-            console.error('Error creating request:', error);
-            showAlert(error.message || 'Failed to create request. Please try again.', 'danger');
+            console.error('Failed to submit eligibility decision:', error);
+            if (eligibilityError) {
+                showError(eligibilityError, error.message || 'Failed to submit decision. Please try again.');
+            }
+        } finally {
+            hideLoading('submitEligibilityBtn');
         }
     });
+
+    loadManageRequestsTable();
 }
+
+
 
 async function initReports() {
     try {
@@ -1094,10 +1062,25 @@ function setupUserManagementEvents() {
         return;
     }
 
-    const userModal = new bootstrap.Modal(userModalEl);
-    const deleteModal = new bootstrap.Modal(deleteModalEl);
     const userForm = document.getElementById('userForm');
     let currentUserId = null;
+
+    // Custom modal functions
+    function showUserModal() {
+        userModalEl.classList.remove('d-none');
+    }
+    
+    function hideUserModal() {
+        userModalEl.classList.add('d-none');
+    }
+    
+    function showDeleteModal() {
+        deleteModalEl.classList.remove('d-none');
+    }
+    
+    function hideDeleteModal() {
+        deleteModalEl.classList.add('d-none');
+    }
 
     document.getElementById('createUserBtn').addEventListener('click', () => {
         currentUserId = null;
@@ -1106,7 +1089,7 @@ function setupUserManagementEvents() {
         document.getElementById('passwordGroup').style.display = 'block';
         document.getElementById('password').required = true;
         document.getElementById('formError').classList.add('d-none');
-        userModal.show();
+        showUserModal();
     });
 
     document.getElementById('usersTableContainer').addEventListener('click', async (e) => {
@@ -1130,18 +1113,20 @@ function setupUserManagementEvents() {
                 document.getElementById('department').value = user.department || '';
                 document.getElementById('position').value = user.position || '';
                 document.getElementById('phoneNumber').value = user.phoneNumber || '';
+                document.getElementById('telegramId').value = user.telegramId || '';
+                document.getElementById('telegramUsername').value = user.telegramUsername || '';
                 document.getElementById('status').value = user.status || 'active';
 
                 document.getElementById('passwordGroup').style.display = 'none';
                 document.getElementById('password').required = false;
                 document.getElementById('formError').classList.add('d-none');
-                userModal.show();
+                showUserModal();
             } catch (error) {
                 console.error(`Failed to fetch user ${userId} for editing:`, error);
                 showAlert('Could not load user data. Please try again.', 'danger');
             }
         } else if (target.classList.contains('delete-user-btn')) {
-            deleteModal.show();
+            showDeleteModal();
         }
     });
 
@@ -1162,6 +1147,8 @@ function setupUserManagementEvents() {
             position: document.getElementById('position').value,
             phoneNumber: document.getElementById('phoneNumber').value,
             status: document.getElementById('status').value,
+            telegramId: document.getElementById('telegramId').value,
+            telegramUsername: document.getElementById('telegramUsername').value,
         };
 
         try {
@@ -1173,7 +1160,7 @@ function setupUserManagementEvents() {
                 await api.createUser(userData);
                 showAlert('User created successfully!', 'success');
             }
-            userModal.hide();
+            hideUserModal();
             loadUsersTable();
         } catch (error) {
             showAlert(error.message || 'Failed to save user.', 'danger', 'formError');
@@ -1194,7 +1181,7 @@ function setupUserManagementEvents() {
         try {
             await api.deleteUser(currentUserId);
             showAlert('User deleted successfully.', 'success');
-            deleteModal.hide();
+            hideDeleteModal();
             loadUsersTable();
         } catch (error) {
             showAlert('Failed to delete user.', 'danger');
@@ -1205,6 +1192,25 @@ function setupUserManagementEvents() {
     });
 
     document.getElementById('refreshUsersBtn')?.addEventListener('click', loadUsersTable);
+
+    // Modal close handlers
+    document.getElementById('closeUserModal')?.addEventListener('click', hideUserModal);
+    document.getElementById('cancelUserBtn')?.addEventListener('click', hideUserModal);
+    document.getElementById('closeDeleteModal')?.addEventListener('click', hideDeleteModal);
+    document.getElementById('cancelDeleteBtn')?.addEventListener('click', hideDeleteModal);
+
+    // Close modals when clicking outside
+    userModalEl.addEventListener('click', (e) => {
+        if (e.target === userModalEl) {
+            hideUserModal();
+        }
+    });
+
+    deleteModalEl.addEventListener('click', (e) => {
+        if (e.target === deleteModalEl) {
+            hideDeleteModal();
+        }
+    });
 }
 
 function setupFleetManagementEvents() {
@@ -1215,17 +1221,32 @@ function setupFleetManagementEvents() {
         return;
     }
 
-    const vehicleModal = new bootstrap.Modal(vehicleModalEl);
-    const deleteModal = new bootstrap.Modal(deleteModalEl);
     const vehicleForm = document.getElementById('vehicleForm');
     let currentVehicleId = null;
+
+    // Custom modal functions
+    function showVehicleModal() {
+        vehicleModalEl.classList.remove('d-none');
+    }
+    
+    function hideVehicleModal() {
+        vehicleModalEl.classList.add('d-none');
+    }
+    
+    function showDeleteModal() {
+        deleteModalEl.classList.remove('d-none');
+    }
+    
+    function hideDeleteModal() {
+        deleteModalEl.classList.add('d-none');
+    }
 
     document.getElementById('addVehicleBtn')?.addEventListener('click', () => {
         currentVehicleId = null;
         vehicleForm.reset();
         document.getElementById('vehicleModalTitle').textContent = 'Add Vehicle';
         document.getElementById('formError').classList.add('d-none');
-        vehicleModal.show();
+        showVehicleModal();
     });
 
     document.getElementById('vehiclesTableContainer')?.addEventListener('click', async (e) => {
@@ -1251,12 +1272,12 @@ function setupFleetManagementEvents() {
                 document.getElementById('mileage').value = vehicle.mileage || '';
                 document.getElementById('vehicleStatus').value = vehicle.status;
                 document.getElementById('notes').value = vehicle.notes || '';
-                vehicleModal.show();
+                showVehicleModal();
             } catch (error) {
                 showAlert('Failed to load vehicle data for editing.', 'danger');
             }
         } else if (target.classList.contains('delete-vehicle-btn')) {
-            deleteModal.show();
+            showDeleteModal();
         }
     });
 
@@ -1283,7 +1304,7 @@ function setupFleetManagementEvents() {
                 await api.createCar(vehicleData);
                 showAlert('Vehicle added successfully!', 'success');
             }
-            vehicleModal.hide();
+            hideVehicleModal();
             await loadVehiclesTable();
         } catch (error) {
             showAlert(error.message || 'Failed to save vehicle.', 'danger', 'formError');
@@ -1295,7 +1316,7 @@ function setupFleetManagementEvents() {
         try {
             await api.deleteCar(currentVehicleId);
             showAlert('Vehicle deleted successfully.', 'success');
-            deleteModal.hide();
+            hideDeleteModal();
             await loadVehiclesTable();
         } catch (error) {
             showAlert('Failed to delete vehicle.', 'danger');
@@ -1313,17 +1334,38 @@ function setupFleetManagementEvents() {
             }
         }, 500);
     });
-    document.getElementById('clearFilters')?.addEventListener('click', () => {
+    document.getElementById('clearFiltersBtn')?.addEventListener('click', () => {
         document.getElementById('statusFilter').value = '';
         document.getElementById('typeFilter').value = '';
         document.getElementById('searchVehicles').value = '';
         loadVehiclesTable();
     });
+
+    // Modal close handlers
+    document.getElementById('closeVehicleModal')?.addEventListener('click', hideVehicleModal);
+    document.getElementById('cancelVehicleBtn')?.addEventListener('click', hideVehicleModal);
+    document.getElementById('closeDeleteModal')?.addEventListener('click', hideDeleteModal);
+    document.getElementById('cancelDeleteBtn')?.addEventListener('click', hideDeleteModal);
+
+    // Close modals when clicking outside
+    vehicleModalEl.addEventListener('click', (e) => {
+        if (e.target === vehicleModalEl) {
+            hideVehicleModal();
+        }
+    });
+
+    deleteModalEl.addEventListener('click', (e) => {
+        if (e.target === deleteModalEl) {
+            hideDeleteModal();
+        }
+    });
 }
+
 function setupMyRequestsEvents() {
     const container = document.getElementById('requestsTableContainer');
     if (!container) return;
 
+// ... (rest of the code remains the same)
     const modal = document.getElementById('requestModal');
     const modalDetails = document.getElementById('requestDetails');
     const closeModalBtn = document.getElementById('closeRequestModal');
@@ -1424,9 +1466,17 @@ function setupApprovalsEvents() {
         return;
     }
     
-    let approvalModal = null; // To be initialized on first click
     let currentRequestId = null;
     let currentAction = null;
+
+    // Custom modal functions
+    function showApprovalModal() {
+        modalElement.classList.remove('d-none');
+    }
+    
+    function hideApprovalModal() {
+        modalElement.classList.add('d-none');
+    }
 
     container.addEventListener('click', async (e) => {
         const target = e.target.closest('.approve-btn, .reject-btn');
@@ -1434,10 +1484,6 @@ function setupApprovalsEvents() {
 
         currentRequestId = target.closest('tr').dataset.requestId;
         currentAction = target.classList.contains('approve-btn') ? 'approved' : 'rejected';
-
-        if (!approvalModal) {
-            approvalModal = new bootstrap.Modal(modalElement);
-        }
 
         const modalTitle = modalElement.querySelector('.modal-title');
         const reasonTextarea = modalElement.querySelector('#approvalReason');
@@ -1447,7 +1493,7 @@ function setupApprovalsEvents() {
         decisionSelect.value = currentAction;
         reasonTextarea.required = currentAction === 'rejected';
 
-        approvalModal.show();
+        showApprovalModal();
     });
 
     const submitButton = document.getElementById('submitApprovalBtn');
@@ -1464,9 +1510,7 @@ function setupApprovalsEvents() {
             try {
                 await api.updateRequestStatus(currentRequestId, decision, reason);
                 showAlert(`Request ${decision} successfully.`, 'success');
-                if (approvalModal) {
-                    approvalModal.hide();
-                }
+                hideApprovalModal();
                 initApprovals(); // Refresh the approvals list
             } catch (error) {
                 console.error(`Failed to ${decision} request:`, error);
@@ -1474,6 +1518,17 @@ function setupApprovalsEvents() {
             }
         });
     }
+
+    // Modal close handlers
+    document.getElementById('closeApprovalModal')?.addEventListener('click', hideApprovalModal);
+    document.getElementById('cancelApprovalBtn')?.addEventListener('click', hideApprovalModal);
+
+    // Close modal when clicking outside
+    modalElement.addEventListener('click', (e) => {
+        if (e.target === modalElement) {
+            hideApprovalModal();
+        }
+    });
 }
 
 async function loadVehiclesTable() {

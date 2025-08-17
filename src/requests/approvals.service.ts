@@ -70,6 +70,58 @@ export class ApprovalsService {
     });
   }
 
+  async processEligibilityDecision(
+    id: string,
+    approverId: string,
+    isEligible: boolean,
+    comments?: string,
+  ): Promise<Approval> {
+    const approval = await this.findOne(id);
+
+    if (approval.approverId !== approverId) {
+      throw new BadRequestException('You are not authorized to process this approval.');
+    }
+
+    if (approval.type !== ApprovalType.ELIGIBILITY_CHECK) {
+      throw new BadRequestException('This approval is not for an eligibility check.');
+    }
+
+    if (approval.status !== ApprovalStatus.PENDING) {
+      throw new BadRequestException('Can only process pending approvals.');
+    }
+
+    if (!isEligible && !comments) {
+      throw new BadRequestException('Comments are required for an ineligible decision.');
+    }
+
+    const newStatus = isEligible ? ApprovalStatus.APPROVED : ApprovalStatus.REJECTED;
+    await this.approvalRepository.update(id, {
+      status: newStatus,
+      comments,
+      approvedAt: new Date(),
+    });
+
+    const updatedApproval = await this.findOne(id);
+    const requestStatus = isEligible ? RequestStatus.PENDING_APPROVAL : RequestStatus.INELIGIBLE;
+    
+    await this.requestRepository.update(approval.requestId, {
+      status: requestStatus,
+      rejectionReason: isEligible ? null : comments,
+    });
+
+    if (isEligible) {
+      await this.createFinalApproval(approval.requestId);
+    }
+
+    // Notify about the decision
+    await this.notificationsService.notifyApprovalDecision(updatedApproval, isEligible);
+    if (!isEligible) {
+        await this.notificationsService.notifyRequestRejected(updatedApproval.request, comments);
+    }
+
+    return updatedApproval;
+  }
+
   async findOne(id: string): Promise<Approval> {
     const approval = await this.approvalRepository.findOne({
       where: { id },

@@ -31,7 +31,7 @@ export class RequestsService {
     const request = this.requestRepository.create({
       ...createRequestDto,
       userId,
-      status: RequestStatus.SUBMITTED,
+      status: RequestStatus.PENDING_ELIGIBILITY, // Start with eligibility check
     });
 
     const savedRequest = await this.requestRepository.save(request);
@@ -115,6 +115,32 @@ export class RequestsService {
       .orderBy('request.createdAt', 'DESC');
 
     return query.getMany();
+  }
+
+  async findPendingEligibilityChecks(authorityId: string): Promise<CarRequest[]> {
+    const authority = await this.usersService.findOne(authorityId);
+    if (!authority || !authority.department) {
+        throw new BadRequestException('Authority user or department not found.');
+    }
+
+    const query = this.requestRepository.createQueryBuilder('request')
+      .innerJoin('request.user', 'user', 'user.department = :department', { department: authority.department })
+      .innerJoin('request.approvals', 'approval',
+        'approval.status = :status AND approval.type = :type',
+        { status: ApprovalStatus.PENDING, type: ApprovalType.ELIGIBILITY_CHECK })
+      .andWhere('request.status = :requestStatus', { requestStatus: RequestStatus.PENDING_ELIGIBILITY })
+      .leftJoinAndSelect('request.approvals', 'all_approvals') // Re-join to get all approvals for the entity
+      .orderBy('request.createdAt', 'DESC');
+
+    return query.getMany();
+  }
+
+  async findAllPendingFinalApprovals(): Promise<CarRequest[]> {
+    return this.requestRepository.find({
+      where: { status: RequestStatus.PENDING_APPROVAL },
+      relations: ['user', 'assignedCar', 'assignedDriver', 'approvals'],
+      order: { createdAt: 'DESC' },
+    });
   }
 
   async update(id: string, updateRequestDto: UpdateRequestDto): Promise<CarRequest> {

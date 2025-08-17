@@ -44,6 +44,20 @@ export class RequestsController {
     return this.requestsService.findPendingApprovals(req.user.userId);
   }
 
+  @Get('pending-eligibility')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.AUTHORITY)
+  findPendingEligibilityChecks(@Request() req) {
+    return this.requestsService.findPendingEligibilityChecks(req.user.userId);
+  }
+
+  @Get('pending-final-approval')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN)
+  findAllPendingFinalApprovals() {
+    return this.requestsService.findAllPendingFinalApprovals();
+  }
+
   @Get('stats')
   @UseGuards(RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.AUTHORITY)
