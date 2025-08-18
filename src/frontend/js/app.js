@@ -1813,3 +1813,32 @@ function loadApprovalsTable(approvals) {
     `;
     container.innerHTML = tableHtml;
 }
+
+// Department Management API Methods
+api.getDepartments = async function() {
+    return await this.request('/departments');
+};
+
+api.createDepartment = async function(departmentData) {
+    return await this.request('/departments', 'POST', departmentData);
+};
+
+api.updateDepartment = async function(id, departmentData) {
+    return await this.request(`/departments/${id}`, 'PATCH', departmentData);
+};
+
+api.deleteDepartment = async function(id) {
+    return await this.request(`/departments/${id}`, 'DELETE');
+};
+
+api.getDepartmentUsers = async function(departmentId) {
+    return await this.request(`/departments/${departmentId}/users`);
+};
+
+api.assignDepartmentAuthority = async function(departmentId, authorityId) {
+    return await this.request(`/departments/${departmentId}/assign-authority`, 'POST', { authorityId });
+};
+
+api.assignUserToDepartment = async function(userId, departmentId) {
+    return await this.request('/departments/assign-user', 'POST', { userId, departmentId });
+};

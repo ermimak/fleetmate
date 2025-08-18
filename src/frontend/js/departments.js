@@ -30,8 +30,59 @@ api.assignUserToDepartment = async function(userId, departmentId) {
 // Department Management Functions
 let currentDepartmentId = null;
 
-function setupDepartmentManagement() {
+document.addEventListener('DOMContentLoaded', function() {
+    // Check authentication first
+    if (!localStorage.getItem('token')) {
+        window.location.href = '/login.html';
+        return;
+    }
+    
+    // Initialize page
+    initializePage();
     loadDepartmentsTable();
+    
+    // Add form submit handler
+    const form = document.getElementById('departmentForm');
+    if (form) {
+        form.addEventListener('submit', handleDepartmentSubmit);
+    }
+});
+
+// Initialize page with user info and navigation
+async function initializePage() {
+    try {
+        const currentUser = await api.getCurrentUser();
+        if (currentUser) {
+            document.getElementById('currentUserName').textContent = `${currentUser.firstName} ${currentUser.lastName}`;
+            
+            // Show/hide navigation based on role
+            const roleBasedNavItems = {
+                'approvalsNav': ['approver', 'admin', 'authority'],
+                'manageRequestsNav': ['admin', 'authority'],
+                'userManagementNav': ['admin'],
+                'fleetManagementNav': ['admin', 'authority'],
+                'departmentManagementNav': ['admin'],
+                'reportsNav': ['admin', 'authority']
+            };
+
+            Object.entries(roleBasedNavItems).forEach(([navId, allowedRoles]) => {
+                const navElement = document.getElementById(navId);
+                if (navElement) {
+                    if (allowedRoles.includes(currentUser.role)) {
+                        navElement.style.display = 'block';
+                    } else {
+                        navElement.style.display = 'none';
+                    }
+                }
+            });
+        }
+    } catch (error) {
+        console.error('Error initializing page:', error);
+        window.location.href = '/login.html';
+    }
+}
+
+function setupDepartmentManagement() {
     loadAuthorityUsers();
     setupDepartmentEvents();
 }
@@ -48,68 +99,72 @@ async function loadDepartmentsTable() {
     if (!container) return;
 
     container.innerHTML = `<div class="text-center text-muted"><div class="loading"></div> Loading departments...</div>`;
-
     try {
+        // Show loading spinner
+        container.innerHTML = `
+            <div class="text-center py-4">
+                <div class="spinner-border" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+            </div>
+        `;
+
         const departments = await api.getDepartments();
-        displayDepartmentsTable(departments, container);
+        
+        if (!departments || departments.length === 0) {
+            container.innerHTML = '<div class="text-center text-muted py-4">No departments found.</div>';
+            return;
+        }
+
+        const tableHtml = `
+        <div class="table-responsive">
+            <table class="table table-striped table-hover">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Name</th>
+                        <th>Code</th>
+                        <th>Description</th>
+                        <th>Authority</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${departments.map(dept => `
+                        <tr>
+                            <td><strong>${escapeHTML(dept.name)}</strong></td>
+                            <td><span class="badge bg-secondary">${dept.code || 'N/A'}</span></td>
+                            <td>${dept.description || '-'}</td>
+                            <td>${dept.authority ? `${dept.authority.firstName} ${dept.authority.lastName}` : '<span class="text-muted">Not assigned</span>'}</td>
+                            <td>
+                                <span class="badge ${dept.isActive ? 'bg-success' : 'bg-secondary'}">
+                                    ${dept.isActive ? 'Active' : 'Inactive'}
+                                </span>
+                            </td>
+                            <td>
+                                <div class="btn-group" role="group">
+                                    <button class="btn btn-sm btn-outline-primary" onclick="editDepartment('${dept.id}')" title="Edit">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-info" onclick="manageDepartmentUsers('${dept.id}', '${escapeHTML(dept.name)}')" title="Manage Users">
+                                        <i class="bi bi-people"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-danger" onclick="deleteDepartment('${dept.id}', '${escapeHTML(dept.name)}')" title="Delete">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+        `;
+        container.innerHTML = tableHtml;
     } catch (error) {
         console.error('Error loading departments:', error);
-        container.innerHTML = `<div class="alert alert-danger">Error loading departments: ${error.message}</div>`;
+        container.innerHTML = '<div class="alert alert-danger">Failed to load departments. Please try again.</div>';
     }
-}
-
-function displayDepartmentsTable(departments, container) {
-    if (departments.length === 0) {
-        container.innerHTML = `<div class="text-center text-muted">No departments found.</div>`;
-        return;
-    }
-
-    const tableHtml = `
-        <table class="table table-striped">
-            <thead>
-                <tr>
-                    <th>Name</th>
-                    <th>Code</th>
-                    <th>Authority</th>
-                    <th>Users</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                ${departments.map(dept => `
-                    <tr>
-                        <td>
-                            <strong>${escapeHTML(dept.name)}</strong>
-                            ${dept.description ? `<br><small class="text-muted">${escapeHTML(dept.description)}</small>` : ''}
-                        </td>
-                        <td>${dept.code || '-'}</td>
-                        <td>${dept.authority ? `${dept.authority.firstName} ${dept.authority.lastName}` : '<span class="text-muted">Not assigned</span>'}</td>
-                        <td>${dept.users ? dept.users.length : 0} users</td>
-                        <td>
-                            <span class="badge ${dept.isActive ? 'bg-success' : 'bg-secondary'}">
-                                ${dept.isActive ? 'Active' : 'Inactive'}
-                            </span>
-                        </td>
-                        <td>
-                            <div class="btn-group btn-group-sm">
-                                <button class="btn btn-outline-primary" onclick="editDepartment('${dept.id}')">
-                                    <i class="bi bi-pencil"></i>
-                                </button>
-                                <button class="btn btn-outline-info" onclick="manageDepartmentUsers('${dept.id}')">
-                                    <i class="bi bi-people"></i>
-                                </button>
-                                <button class="btn btn-outline-danger" onclick="deleteDepartment('${dept.id}', '${escapeHTML(dept.name)}')">
-                                    <i class="bi bi-trash"></i>
-                                </button>
-                            </div>
-                        </td>
-                    </tr>
-                `).join('')}
-            </tbody>
-        </table>
-    `;
-    container.innerHTML = tableHtml;
 }
 
 async function loadAuthorityUsers() {
@@ -147,25 +202,13 @@ function openDepartmentModal(departmentId = null) {
     } else {
         title.textContent = 'Add Department';
         submitText.textContent = 'Create Department';
-        document.getElementById('departmentActive').checked = true;
     }
-}
 
-async function loadDepartmentData(departmentId) {
-    try {
-        const departments = await api.getDepartments();
-        const department = departments.find(d => d.id === departmentId);
-        
-        if (department) {
-            document.getElementById('departmentName').value = department.name;
-            document.getElementById('departmentCode').value = department.code || '';
-            document.getElementById('departmentDescription').value = department.description || '';
-            document.getElementById('departmentAuthority').value = department.authorityId || '';
-            document.getElementById('departmentActive').checked = department.isActive;
-        }
-    } catch (error) {
-        console.error('Error loading department data:', error);
-    }
+    // Load authority users when modal opens
+    loadAuthorityUsers();
+
+    const bootstrapModal = new bootstrap.Modal(modal);
+    bootstrapModal.show();
 }
 
 async function handleDepartmentSubmit(e) {
@@ -193,7 +236,7 @@ async function handleDepartmentSubmit(e) {
         modal.hide();
         loadDepartmentsTable();
         
-        showAlert('success', `Department ${currentDepartmentId ? 'updated' : 'created'} successfully!`);
+        showAlert(`Department ${currentDepartmentId ? 'updated' : 'created'} successfully!`, 'success');
     } catch (error) {
         console.error('Error saving department:', error);
         errorDiv.textContent = error.message;
