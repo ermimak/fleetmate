@@ -436,6 +436,7 @@ function updateNavigation() {
         'manageRequestsNav': ['admin', 'authority'],
         'fleetManagementNav': ['admin', 'authority'],
         'userManagementNav': ['admin'],
+        'departmentManagementNav': ['admin'],
         'reportsNav': ['admin', 'authority']
     };
     

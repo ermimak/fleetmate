@@ -11,6 +11,7 @@ import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { RequestsModule } from './requests/requests.module';
 import { CarsModule } from './cars/cars.module';
+import { DepartmentsModule } from './departments/departments.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { TelegramModule } from './telegram/telegram.module';
 
@@ -31,6 +32,7 @@ import { TelegramModule } from './telegram/telegram.module';
     UsersModule,
     RequestsModule,
     CarsModule,
+    DepartmentsModule,
     NotificationsModule,
     TelegramModule,
   ],
